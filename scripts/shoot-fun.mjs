@@ -1,4 +1,5 @@
 // Headless screenshots of the Fight view at phone width (390 px): light, dark and reduced motion, with Simulate and no sensors.
+// SCALE=2 for retina images (about 10 MB for the set; the default 1x keeps the repo light).
 //   node scripts/shoot-fun.mjs [outdir]          default: docs/screenshots/fun
 // Adapted from the sibling repos' shoot scripts. Starts the static server on :5362 (PORT to override). Needs Google Chrome +
 // playwright-core (PW=/path/to/playwright-core). Each variant plays the warm-up round (about 31 s) and one coached round (about 31 s).
@@ -44,7 +45,7 @@ async function until(page, fn, ms) {
 }
 
 for (const v of VARIANTS) {
-  const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, ...v.opts });
+  const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: Number(process.env.SCALE || 1), ...v.opts });
   const page = await ctx.newPage();
   page.on("pageerror", (e) => errors.push(`${v.name} pageerror: ${e.message}`));
   page.on("console", (m) => { if (m.type() === "error" || m.type() === "warning") errors.push(`${v.name} console ${m.type()}: ${m.text()}`); });
