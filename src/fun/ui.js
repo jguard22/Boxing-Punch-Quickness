@@ -201,6 +201,14 @@ export function createView() {
   function recap({ cards, cta, ask, note, onCta, onLater, onExport, onClose, onFeedback, xpInfo }) {
     const dlg = $("fun-recap");
     if (!dlg) return Promise.resolve();
+    let finish = () => {}, closed = false;
+    const done = new Promise((resolve) => { finish = resolve; });
+    const close = () => {
+      if (closed) return;
+      closed = true;
+      try { if (dlg.open) dlg.close(); } catch { dlg.removeAttribute("open"); }
+      finish(); onClose?.();
+    };
     const carousel = renderRecapCarousel(cards, { labels: { slide: "{n} of {total}", recapRegion: COPY.recap.aria } });
     const first = carousel.querySelector(".fk-recap-card");
     const roundsCard = cards[0];
@@ -231,14 +239,10 @@ export function createView() {
       pressed($("seg-recap-fb"), null);
       $("seg-recap-fb")?.querySelectorAll("button").forEach((b) => { b.onclick = () => { pressed($("seg-recap-fb"), b.dataset.v); onFeedback?.(b.dataset.v); setText($("recap-note"), COPY.feedback.thanks); }; });
     }
-    return new Promise((resolve) => {
-      let closed = false;
-      function close() { if (closed) return; closed = true; try { dlg.close(); } catch { dlg.removeAttribute("open"); } resolve(); onClose?.(); }
-      dlg.onclose = () => { if (!closed) { closed = true; resolve(); onClose?.(); } };
-      dlg.oncancel = () => { /* Esc closes through onclose */ };
-      try { if (!dlg.open) dlg.showModal(); } catch { dlg.setAttribute("open", ""); }
-      announce(COPY.recap.aria);
-    });
+    dlg.onclose = () => close();                       // Esc closes the dialog natively; the promise settles either way
+    try { if (!dlg.open) dlg.showModal(); } catch { dlg.setAttribute("open", ""); }
+    announce(COPY.recap.aria);
+    return done;
   }
   const closeRecap = () => { const d = $("fun-recap"); try { if (d?.open) d.close(); } catch { d?.removeAttribute("open"); } };
 

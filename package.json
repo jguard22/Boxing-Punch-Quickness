@@ -6,6 +6,8 @@
   "scripts": {
     "test": "node --test test/*.test.mjs",
     "serve": "node scripts/serve.mjs",
-    "smoke": "node scripts/smoke.mjs"
+    "smoke": "node scripts/smoke.mjs",
+    "smoke:fun": "node scripts/smoke-fun.mjs",
+    "shoot:fun": "node scripts/shoot-fun.mjs"
   }
 }

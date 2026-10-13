@@ -44,6 +44,9 @@ export function createSession({ view, win = globalThis.window, now = () => perfo
   const st = { set: null, round: null, ticker: null, fwTick: 0, forgetArmed: null, hold: null };
 
   const cmd = (name, extra = {}) => win.dispatchEvent(new win.CustomEvent("bwcmd", { detail: { cmd: name, ...extra } }));
+  /** This week's ring from the streak's read-only state (kit.summary() also pins today's challenges, which would write after Forget my data). */
+  const weekState = () => { try { return kit.streaks.state(wall()).thisWeek ?? null; } catch { return null; } };
+  const hasWrist = () => { const w = S().wrists; return !!(w.L || w.R); };
   const sensorsLive = () => { const s = S(); return !!(s.sim || s.wrists.L || s.wrists.R); };
   const viewDemo = () => !!(S().sim || st.set?.demo);
   const viewKit = () => (viewDemo() ? demoKit() : kit);
@@ -60,7 +63,7 @@ export function createSession({ view, win = globalThis.window, now = () => perfo
   }
   function refreshStatus() {
     try {
-      const vk = viewKit(), week = kit.summary().streak?.thisWeek ?? null;
+      const vk = viewKit(), week = weekState();
       view.renderStatus({ info: vk.xp.info(), week, demo: viewDemo() });
     } catch (e) { warn("status", e); }
   }
@@ -77,14 +80,14 @@ export function createSession({ view, win = globalThis.window, now = () => perfo
   // ---------------------------------------------------------------------------------------------- starting
   function hint(text) { view.hint(text); }
   function ensureSensors() {
-    if (sensorsLive()) { hint(null); return true; }
+    if (sensorsLive() || (st.set?.demo && !hasWrist())) { hint(null); return true; }   // a finished Simulate set carries on in Simulate
     hint(COPY.hero.noSensor);
     return false;
   }
   /** Start over when a finished or stopped set is still on the page; keeps Simulate on when that is what the person was using. */
   function freshStart() {
     const s = S();
-    const wantSim = s.sim || (!!st.set?.demo && !(s.wrists.L || s.wrists.R));
+    const wantSim = s.sim || (!!st.set?.demo && !hasWrist());
     if (s.rounds.length || s.clock) cmd("reset");
     if (wantSim && !S().sim) cmd("sim", { on: true });
   }
@@ -109,6 +112,7 @@ export function createSession({ view, win = globalThis.window, now = () => perfo
 
   // ---------------------------------------------------------------------------------------------- the bridge
   function onEvent(d) {
+    if (mode !== "fight" && d.type !== "session.reset") return;     // the Lab view is the page as it was: the game is switched off
     switch (d.type) {
       case "punch": return mode === "fight" ? onPunch(d.p) : undefined;
       case "round.started": return mode === "fight" ? onRoundStarted(d) : undefined;
@@ -434,7 +438,7 @@ export function createSession({ view, win = globalThis.window, now = () => perfo
     const strings = new Set(all.flatMap((r) => [...r.comboStrings]));
     const speeds = all.filter((r) => r.meanV).map((r) => r.meanV);
     const heldPct = speeds.length > 1 ? Math.round((speeds.at(-1) / speeds[0]) * 100) : null;
-    const week = kit.summary().streak?.thisWeek ?? null;
+    const week = weekState();
     const unlock = nextUnlock(info.level);
     return {
       cards: buildRecapCards({

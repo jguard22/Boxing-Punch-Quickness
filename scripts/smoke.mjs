@@ -1,4 +1,5 @@
-// Headless smoke test of Simulate mode in system Chrome (playwright-core).
+// Headless smoke test of Simulate mode in system Chrome (playwright-core), on the lab view (?mode=lab, the original page).
+// The Fight view has its own smoke: scripts/smoke-fun.mjs.
 //   node scripts/smoke.mjs [outdir]
 // Starts the static server on :5362 (PORT to override), drives a short 3-round
 // session, asserts the feature set renders, the unit switch works, and that the
@@ -20,6 +21,8 @@ function findPw() {
 const { chromium } = require(findPw());
 
 const PORT = Number(process.env.PORT || 5362);
+const PAGE = `http://127.0.0.1:${PORT}/index.html`;
+const url = (q = "") => `${PAGE}?mode=lab${q ? `&${q}` : ""}`;
 const OUT = process.argv[2] || path.join(os.tmpdir(), "boxing-shots");
 mkdirSync(OUT, { recursive: true });
 const failures = [];
@@ -43,7 +46,7 @@ const txt = (page, sel) => page.$eval(sel, (e) => e.textContent.trim());
 try {
   // ---- A: full 3-round session with sim insoles ----
   const page = await newPage({ width: 1360, height: 900 });
-  await page.goto(`http://127.0.0.1:${PORT}/index.html?round=0.15&rest=0.05&rounds=3`);
+  await page.goto(url("round=0.15&rest=0.05&rounds=3"));
   check((await txt(page, "#clock-sub")).startsWith("9 s round · 3 s rest"), "URL params set the timer (9 s / 3 s)");
   await page.click("#btn-sim");
   await page.click("#btn-rounds");
@@ -126,7 +129,7 @@ try {
 
   // ---- B: optional insoles absent ----
   const pb = await newPage({ width: 1360, height: 900 });
-  await pb.goto(`http://127.0.0.1:${PORT}/index.html`);
+  await pb.goto(url());
   await pb.uncheck("#sim-insoles");
   await pb.uncheck("#sim-truth");
   await pb.click("#btn-sim");
@@ -152,7 +155,7 @@ try {
 
   // ---- C: southpaw + stop mid-round + unit preference survives reload ----
   const pc = await newPage({ width: 1360, height: 900 });
-  await pc.goto(`http://127.0.0.1:${PORT}/index.html?round=0.5&rest=0.05&rounds=2`);
+  await pc.goto(url("round=0.5&rest=0.05&rounds=2"));
   await pc.click("#btn-stance");
   check((await txt(pc, "#btn-stance")) === "Stance: Southpaw", "stance toggle");
   await pc.click('#units-seg button[data-unit="mph"]');
@@ -176,8 +179,8 @@ try {
 
   // ---- D: URL timer overrides are one-offs; edits on the page persist ----
   const pd = await newPage({ width: 1360, height: 900 });
-  const base = `http://127.0.0.1:${PORT}/index.html`;
-  await pd.goto(`${base}?round=0.15&rest=0.05&rounds=3`);
+  const base = url();
+  await pd.goto(url("round=0.15&rest=0.05&rounds=3"));
   await pd.click("#btn-rounds");                               // Start Rounds runs savePrefs()
   await pd.waitForTimeout(300);
   await pd.click("#btn-rounds");                               // Stop
@@ -185,7 +188,7 @@ try {
   check((await txt(pd, "#clock-sub")) === "3 min round · 1 min rest × 3", `demo link did not change saved defaults (${await txt(pd, "#clock-sub")})`);
   await pd.fill("#set-rounds", "4");
   await pd.dispatchEvent("#set-rounds", "change");
-  await pd.goto(`${base}?round=0.15`);
+  await pd.goto(url("round=0.15"));
   check((await txt(pd, "#clock-sub")) === "9 s round · 1 min rest × 4", `URL overrides one field, saved edit survives (${await txt(pd, "#clock-sub")})`);
   await pd.goto(base);
   check((await txt(pd, "#clock-sub")) === "3 min round · 1 min rest × 4", `edit on the page persists, URL value does not (${await txt(pd, "#clock-sub")})`);
@@ -212,7 +215,7 @@ try {
 
   // ---- F: Stop pressed before the 100 ms tick delivered roundEnd still closes the round ----
   const pf = await newPage({ width: 1360, height: 900 });
-  await pf.goto(`${base}?round=0.1&rest=0.05&rounds=2`);
+  await pf.goto(url("round=0.1&rest=0.05&rounds=2"));
   const closed = await pf.evaluate(() => {
     const b = document.getElementById("btn-rounds");
     b.click();                                                  // Start

@@ -283,3 +283,25 @@ test("the simulator waits while a call is open, and answers a call on request", 
   assert.equal(env.win.__bwBoxing.hooks.simBusy(), true);
   assert.ok(env.cmds.some((c) => c.cmd === "simAnswer" && Array.isArray(c.nums)), "the simulated boxer is asked to throw its answer");
 });
+
+test("after a Simulate set finished (the page stopped Simulate itself), Round 1: Coach Calls carries on in Simulate", () => {
+  const env = makeEnv({ sim: true, wrists: { L: false, R: false } });
+  warmup(env);
+  env.S.sim = false;                                    // the page stops Simulate when the rounds end
+  env.cmds.length = 0;
+  env.session.startCoached();
+  assert.deepEqual(env.cmds.map((c) => c.cmd), ["reset", "sim", "rounds"]);
+  assert.equal(env.cmds[1].on, true);
+});
+
+test("with no sensor and no Simulate, starting says what to do and sends no command", () => {
+  const env = makeEnv({ wrists: { L: false, R: false } });
+  env.cmds.length = 0;
+  env.session.startWarmup();
+  assert.deepEqual(env.cmds, []);
+  assert.match(env.seen("hint").at(-1)[1], /No wrist sensor/);
+  env.S.wrists.L = true;
+  env.session.startWarmup();
+  assert.equal(env.cmds.at(-1).cmd, "warmup");
+  assert.equal(env.cmds.at(-1).roundMs, 30000);
+});

@@ -29,6 +29,8 @@
 /* ---------------------------------------------------------------- what is shown in which view */
 .setup-group { display: contents; }
 html[data-fun="off"] .fun-only, html[data-mode="lab"] .fun-only { display: none !important; }
+/* the Fight / Lab switch stays in the header of the lab view, so the way back is always there; ?fun=0 removes it */
+html[data-fun="off"] .fun-switch { display: none !important; }
 html[data-mode="fight"] .lab-card { display: none; }
 html[data-mode="fight"][data-lab="open"] .lab-card { display: block; }
 html[data-mode="fight"]:not([data-setup="open"]) .setup-tool { display: none; }
