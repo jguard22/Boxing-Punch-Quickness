@@ -556,6 +556,6 @@ export function createSession({ view, win = globalThis.window, now = () => perfo
     return api;
   }
 
-  const api = { start, startWarmup, startCoached, openRecap, setting, setMode, feedback, forget, stats, firstWin, countIt, onEvent, _tick: tick, _state: st };
+  const api = { start, startWarmup, startCoached, openRecap, setting, setMode, feedback, forget, stats, firstWin, countIt, onEvent, dispose() { stopTicker(); clearTimeout(st.forgetArmed); st.forgetArmed = null; cel.hush(); }, _tick: tick, _state: st };
   return api;
 }
