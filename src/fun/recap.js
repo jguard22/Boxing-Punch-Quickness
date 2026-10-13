@@ -28,7 +28,7 @@ export function bestMoment({ calls = [], chains = [], allWarmup = false }) {
  * @param {{rounds:Array<{n:number, grade:string, score:number, punches:number, perMin:number|null, xp:number}>,
  *   best:{kind:string|null, str:string, judgment?:string}, comboCount:number, level:number, title:string,
  *   nextUnlock:{level:number, label:string}|null, week:{count:number, target:number, reached:boolean}|null,
- *   heldPct:number|null, eased:boolean, demo:boolean, welcome:number, resetsOnNew:boolean}} o
+ *   heldPct:number|null, eased:boolean, demo:boolean, welcome:number, resetsOnNew:boolean, label?:{reviewed:number, top:string|null}}} o
  */
 export function buildRecapCards(o) {
   const R = COPY.recap;
@@ -46,6 +46,13 @@ export function buildRecapCards(o) {
     title: b.kind === "called" ? R.comboCalled(COPY.judgments[b.judgment]?.name ?? b.judgment) : b.kind === "chain" ? R.comboLongest : R.comboNone,
     list: o.comboCount > 0 ? [R.comboBook(o.comboCount)] : [],
   });
+
+  if (o.label?.reviewed > 0) {
+    cards.push({
+      id: "label", kind: "label", tone: "accent", eyebrow: R.label, big: String(o.label.reviewed), title: R.labelTitle(o.label.reviewed),
+      list: o.label.top ? [R.labelTop(o.label.top)] : [],
+    });
+  }
 
   const next = [];
   if (o.week) next.push(o.week.reached ? R.nextWeekDone : R.nextWeek(o.week.count, o.week.target));

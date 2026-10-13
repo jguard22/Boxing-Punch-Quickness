@@ -181,14 +181,51 @@ test("Count it never overwrites a label somebody already chose", () => {
   assert.equal(p.trueType, "hook");
 });
 
-test("reviewing, relabelling or confirming labels earns nothing", () => {
+test("Label Lab: a reviewed punch pays a flat 1 XP, the same whether the label changed or was confirmed; once per punch, 20 a session; Mark all and Simulate pay nothing", () => {
+  const env = makeEnv();
+  warmup(env, { n: 30 });
+  const ps = env.S.punches;
+  const base = env.kit.xp.total;
+  env.emit("label.reviewed", { p: ps[0], from: null, to: "hook" });                 // changes the auto label (a jab)
+  assert.equal(env.kit.xp.total, base + XP.label);
+  env.emit("label.reviewed", { p: ps[1], from: null, to: ps[1].type });             // confirms the auto label
+  assert.equal(env.kit.xp.total, base + 2 * XP.label, "confirming pays exactly what changing pays");
+  env.emit("label.reviewed", { p: ps[0], from: "hook", to: "jab" });                // the same punch again
+  assert.equal(env.kit.xp.total, base + 2 * XP.label, "one punch pays once, whatever it is changed to");
+  env.emit("label.bulk", { n: 12 });
+  assert.equal(env.kit.xp.total, base + 2 * XP.label, "Mark all unreviewed correct earns 0");
+  env.emit("label.reviewed", { p: { ...ps[2], sim: true }, from: null, to: "jab" });
+  assert.equal(env.kit.xp.total, base + 2 * XP.label, "a simulated punch never counts");
+  for (let i = 2; i < ps.length; i++) env.emit("label.reviewed", { p: ps[i], from: null, to: "jab" });
+  assert.equal(env.kit.xp.total - base, XP.labelMax * XP.label, "20 a session at most, and the cap is reached");
+  const more = env.throw({ startT: env.t, n: 99 });
+  const before = env.kit.xp.total;
+  env.emit("label.reviewed", { p: more, from: null, to: "jab" });
+  assert.equal(env.kit.xp.total, before, "past 20 it pays nothing");
+});
+
+test("Label Lab pays nothing on the Simulate profile, and a reviewed label never changes a call judgment or the grade", () => {
+  const env = makeEnv({ sim: true });
+  warmup(env);
+  const total = env.kit.xp.total;
+  env.emit("label.reviewed", { p: env.S.punches[0], from: null, to: "hook" });
+  assert.equal(env.kit.xp.total, total);
+  assert.equal(env.session._state.set.reviewed?.size ?? 0, 0);
+});
+
+test("the recap shows the Label Lab card only once something was reviewed, and never mentions agreeing", () => {
   const env = makeEnv();
   warmup(env);
-  const total = env.kit.xp.total, sessions = env.kit.summary().badges.items.length;
+  env.session.openRecap();
+  const first = env.seen("recap").at(-1)[1].cards;
+  assert.deepEqual(first.map((c) => c.id), ["rounds", "combo", "next"]);
   env.emit("label.reviewed", { p: env.S.punches[0], from: null, to: "hook" });
-  env.emit("label.bulk", { n: 12 });
-  assert.equal(env.kit.xp.total, total);
-  assert.equal(env.kit.summary().badges.items.length, sessions);
+  env.emit("label.reviewed", { p: env.S.punches[1], from: null, to: "hook" });
+  env.session.openRecap();
+  const cards = env.seen("recap").at(-1)[1].cards;
+  assert.deepEqual(cards.map((c) => c.id), ["rounds", "combo", "label", "next"]);
+  assert.match(cards[2].title, /You coached the coach: 2 punches reviewed\./);
+  assert.ok(!/agree|match|accuracy/i.test(JSON.stringify(cards[2])));
 });
 
 test("twelve rounds a day, then a round pays 1 XP", () => {

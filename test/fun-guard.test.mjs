@@ -139,13 +139,13 @@ test("every celebration goes through celebrate.js and its gate; no other file ca
   assert.match(c, /createQuietGate/);
   assert.match(c, /gate\.run\(/);
   assert.match(c, /playOutcome\(/);
-  assert.match(read("src/fun/session.js"), /cel\.celebrateRound\(/);
+  assert.match(read("src/fun/session.js"), /cel\.celebrateOutcome\(/);
 });
 
 test("the gate holds a celebration while a round runs and plays it when the round ends", async () => {
   let running = true;
   cel.bind({ quiet: () => running, windowOpen: () => false });
-  const handle = cel.celebrateRound({ outcome: { celebrations: [] } });
+  const handle = cel.celebrateOutcome({ outcome: { celebrations: [] } });
   await new Promise((r) => setTimeout(r, 20));
   assert.equal(cel.gate.quiet, true, "closed while a round runs");
   assert.ok(cel.gate.pending > 0, "the celebration is waiting, not playing");

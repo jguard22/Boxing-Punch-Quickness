@@ -14,7 +14,7 @@ import {
   XP, WARMUP, FIRST_WIN, SPEED_PB_IDS, CALL, FLOW, JUDGMENTS,
 } from "./config.js";
 import {
-  speedGateOpen, speedTier, roundGrade, roundXp, bumpDayCount, roundsOnDay, mean,
+  speedGateOpen, speedTier, roundGrade, roundXp, bumpDayCount, roundsOnDay, mean, labelReviewXp,
 } from "./rules.js";
 import {
   parseCall, callSchedule, windowState, judge, flowStart, flowStep, handFor, nextUnlock, readNum,
@@ -125,9 +125,38 @@ export function createSession({ view, win = globalThis.window, now = () => perfo
       case "device": hint(null); return refreshHero();
       case "units": view.mirrorLast(); return refreshHero();
       case "stance.changed": return undefined;
-      case "label.reviewed": case "label.bulk": return undefined;   // labels pay nothing: no reward depends on changing or confirming one
+      case "label.reviewed": return onLabelReviewed(d);
+      case "label.bulk": return undefined;                          // "Mark all unreviewed correct" earns 0
       default: return undefined;
     }
+  }
+
+  /**
+   * Label Lab: a punch you reviewed pays a flat 1 XP (20 a session, once per punch, nothing for Simulate or Mark all). It pays the
+   * same whether the choice changed the auto label or confirmed it: no reward depends on agreeing or disagreeing.
+   */
+  function onLabelReviewed(d) {
+    const p = d.p, set = st.set;
+    if (!p || !set || set.demo) return;
+    set.reviewed ??= new Set();
+    const amount = labelReviewXp({ paid: set.reviewed.size, alreadyPaid: set.reviewed.has(p.n), sim: !!p.sim });
+    if (!amount) return;
+    set.reviewed.add(p.n);
+    try {
+      const res = kit.xp.award({ amount, source: "label", label: COPY.labelLab.xp, key: `label:${set.id}:${p.n}` }, { at: wall() });
+      if (res.levelUp) cel.celebrateOutcome({ outcome: { xp: res, celebrations: [{ type: "levelup", level: res.toLevel, title: res.title }] } });
+    } catch (e) { warn("label", e); }
+    refreshStatus();
+  }
+  const plural = (t) => (t === "cross" ? "crosses" : `${t}s`);
+  /** The most common mix-up among the punches you reviewed ("hooks read as jabs"), from the page's confusion counts. */
+  function topMixup() {
+    try {
+      const cf = core().confusion(S().punches);
+      let best = null;
+      for (const a of core().TYPES) for (const b of core().TYPES) if (a !== b && cf.m[a][b] > 0 && (!best || cf.m[a][b] > best.n)) best = { a, b, n: cf.m[a][b] };
+      return best ? `${plural(best.a)} read as ${plural(best.b)}` : null;
+    } catch { return null; }
   }
 
   function onSim(on) {
@@ -399,7 +428,7 @@ export function createSession({ view, win = globalThis.window, now = () => perfo
         bundle.outcome = outcome;
         bundle.xp = outcome.xp?.gained ?? xp.total;
         bundle.levelUp = !!outcome.xp?.levelUp;
-        set.celebration = cel.celebrateRound({ outcome });
+        set.celebration = cel.celebrateOutcome({ outcome });
       } catch (e) { warn("round", e); bundle.xp = xp.total; }
     }
     if (finished) set.finished++;
@@ -447,6 +476,7 @@ export function createSession({ view, win = globalThis.window, now = () => perfo
         comboCount: strings.size, level: info.level, title: info.title, nextUnlock: unlock ? { level: unlock.level, label: unlock.label } : null,
         week: week ? { count: week.count, target: week.target, reached: week.reached } : null,
         heldPct, eased: all.some((r) => r.fadeBig), demo: set.demo, welcome: set.won ? XP.welcome : 0, resetsOnNew: false,
+        label: { reviewed: set.reviewed?.size ?? 0, top: topMixup() },
       }),
       info,
     };

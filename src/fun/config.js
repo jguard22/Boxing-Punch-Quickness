@@ -31,6 +31,7 @@ export const XP = Object.freeze({
   completeFrac: 0.9,
   welcome: 40,                                         // one time, on the real profile, when the warm-up round ends the first time
   dayCap: 200, roundsPerDay: 12, afterRounds: 1,       // 12 rounds a day; after that each round earns 1 XP
+  label: 1, labelMax: 20,                              // Label Lab: a punch you reviewed pays a flat 1, 20 a session, never for "Mark all", never for Simulate
 });
 
 /** The warm-up gate: no speed best and no Snap tier in the first minute of a session or anywhere in the warm-up round. */

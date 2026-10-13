@@ -100,7 +100,7 @@
       ...raw, n: S.punches.length + 1, trueType: null,
       gapMs: prev ? Math.max(0, Math.round(raw.startT - prev.t)) : null,
       round: ph && ph.phase === "round" ? ph.n : 0,
-      shiftPp: null, frontPct: null,
+      shiftPp: null, frontPct: null, sim: S.sim,        // sim: thrown by the simulator (never counted toward the label game)
     };
     if (insolePresent()) {
       const w = C.weightShift(S.insole.buf, raw.startT, raw.t, raw.lead === "L" ? "left" : "right", CFG);

@@ -179,6 +179,19 @@ export function roundXp({ warmup = false, completedFrac, punches, freeCombos, ca
   return { total, parts, fullDay: false, countedPaid, calledPaid };
 }
 
+// ---------------------------------------------------------------------------------------------------- Label Lab
+
+/**
+ * XP for reviewing a punch's label. Flat: it pays the same whether the choice changed the auto label or confirmed it, so nothing
+ * here rewards disagreeing or agreeing (either would bias the training data this page collects). One punch pays once, twenty a
+ * session at most, "Mark all unreviewed correct" pays nothing, and simulated punches pay nothing.
+ * @param {{paid:number, alreadyPaid?:boolean, sim?:boolean, bulk?:boolean}} o paid: reviews already paid this session
+ */
+export function labelReviewXp({ paid, alreadyPaid = false, sim = false, bulk = false }) {
+  if (sim || bulk || alreadyPaid || paid >= XP.labelMax) return 0;
+  return XP.label;
+}
+
 // ---------------------------------------------------------------------------------------------------- haptic budget
 
 /**

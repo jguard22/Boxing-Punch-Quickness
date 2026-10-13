@@ -64,13 +64,13 @@ export const bindDevice = (fn) => { live.device = typeof fn === "function" ? fn 
 
 // ---- celebrations ----------------------------------------------------------------------------------------------------
 /**
- * Everything a round earned, as one gated unit: the kit's staged cues (level-up with its modal and the features it opens,
+ * Everything a round (or a level-up from a label review) earned, as one gated unit: the kit's staged cues (level-up with its modal and the features it opens,
  * personal bests, badges, a kind note). Plays when the gate is open, which is the moment a round ends; waits (and is dropped
  * if it waits too long) while one is running.
  * @param {{outcome:object}} bundle
  * @returns {Promise<{ran:boolean, result?:string[], reason?:string}>} settles when the staged cues and any level-up modal are done
  */
-export function celebrateRound({ outcome }) {
+export function celebrateOutcome({ outcome }) {
   const kit = getKit();
   const handle = gate.run(async () => playOutcome(outcome, {
     sound: soundOn() ? sound : null, haptics: null, guardrails: kit.guard, modal: true, maxToasts: 3, maxBadgeToasts: 2,

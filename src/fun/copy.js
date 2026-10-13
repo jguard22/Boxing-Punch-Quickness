@@ -137,11 +137,16 @@ export const COPY = {
     cleared: "Starting a new session clears this one. Export the CSV first to keep the punches.",
     demoKept: (n) => `Simulate is a demo, so only your Welcome Bonus (+${n} XP) is kept.`,
     demoNone: "Simulate is a demo, so none of this XP is kept.",
+    label: "Label Lab",
+    labelTitle: (n) => `You coached the coach: ${n} ${plural(n, "punch", "punches")} reviewed.`,
+    labelTop: (top) => `The most common mix-up: ${top}.`,
     cta: { coach: "Round 1: Coach Calls", again: "Play again", warm: "Warm-up again", later: "Not now", done: "Done" },
     ctaCoach: (rounds, roundText) => `Round 1: Coach Calls (${rounds} ${plural(rounds, "round")} of ${roundText})`,
     export: "Export punches CSV",
     aria: "Recap of your round",
   },
+
+  labelLab: { xp: "Label reviewed" },
 
   feedback: {
     ask: "How was that?",

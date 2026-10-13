@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { xpToReach, levelFromXp, titleFor } from "../src/vendor/fun-kit/index.js";
 import { CURVE, TITLES, XP, BADGES, GRADES, SPEED_TIERS, WARM_GATE_MS, HAPTIC_QUIET_MS, JUDGMENTS } from "../src/fun/config.js";
 import {
-  speedGateOpen, speedTier, roundGrade, roundXp, strongFinish, hapticAllowed, bumpDayCount, roundsOnDay, balanceScore, rhythmShare, fadePct, paceShare, gradeFor,
+  speedGateOpen, speedTier, roundGrade, roundXp, strongFinish, hapticAllowed, bumpDayCount, roundsOnDay, balanceScore, rhythmShare, fadePct, paceShare, gradeFor, labelReviewXp,
 } from "../src/fun/rules.js";
 import { punch } from "./fun-helpers.mjs";
 
@@ -207,4 +207,15 @@ test("judgment weights run from Perfect down to Missed", () => {
   const w = ["perfect", "great", "good", "count", "missed"].map((j) => JUDGMENTS[j].weight);
   assert.deepEqual(w, [...w].sort((a, b) => b - a));
   assert.equal(JUDGMENTS.missed.weight, 0);
+});
+
+test("Label Lab XP: flat, once per punch, 20 a session, nothing for Mark all or Simulate", () => {
+  assert.equal(labelReviewXp({ paid: 0 }), XP.label);
+  assert.equal(labelReviewXp({ paid: XP.labelMax - 1 }), XP.label);
+  assert.equal(labelReviewXp({ paid: XP.labelMax }), 0);
+  assert.equal(labelReviewXp({ paid: 0, alreadyPaid: true }), 0);
+  assert.equal(labelReviewXp({ paid: 0, bulk: true }), 0);
+  assert.equal(labelReviewXp({ paid: 0, sim: true }), 0);
+  assert.equal(labelReviewXp.length, 1, "one options object: there is no input for whether the label changed or matched");
+  assert.ok(!/changed|agree|match|correct/i.test(labelReviewXp.toString().split("{")[0] + labelReviewXp.toString().split("\n")[0]));
 });
