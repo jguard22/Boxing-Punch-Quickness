@@ -76,8 +76,20 @@ export function createSession({ view, win = globalThis.window, now = () => perfo
     const first = !firstWin.isDone();
     view.setHero({ first, coachText: COPY.hero.coach(S().settings.rounds, roundText()), sim: S().sim });
   }
+  let goalNote = "";
   function refreshSettings() {
-    view.settings({ prefs, stats: stats.snapshot(), firstWinMs: firstWin.state().timeToWinMs ?? stats.snapshot().firstWinMs, feedback: lastFeedback() });
+    let goal = null;
+    try { goal = kit.streaks.goal(wall()); } catch { /* weekly mode only */ }
+    view.settings({ prefs, stats: stats.snapshot(), firstWinMs: firstWin.state().timeToWinMs ?? stats.snapshot().firstWinMs, feedback: lastFeedback(), goal, goalNote });
+  }
+  /** The weekly ring's goal, 1 to 5 sessions. The kit keeps every past week under the goal it was played under, so changing it never re-scores history. */
+  function setGoal(n) {
+    if (!Number.isInteger(n) || n < 1 || n > 5) return { ok: false, reason: "range" };       // 1 to 5 a week here (the kit would allow more)
+    const r = kit.streaks.setGoal(n, { at: wall() });
+    if (!r.ok) return r;
+    goalNote = !r.changed ? COPY.goal.same(n) : r.applies === "now" ? COPY.goal.now(n) : COPY.goal.next(n);
+    refreshSettings(); refreshStatus();
+    return r;
   }
   /** The Combo Book of the profile in view: it appears after the first combo (progressive reveal), never before. */
   function refreshBook(fresh = new Set()) {
@@ -624,7 +636,7 @@ export function createSession({ view, win = globalThis.window, now = () => perfo
       countIt, recap: () => openRecap(), again: () => startCoached(),
       lab: () => view.lab(win.document.documentElement.dataset.lab !== "open"),
       setup: () => view.setup(win.document.documentElement.dataset.setup !== "open"),
-      forget, statsCsv, mode: setMode, setting, feedback,
+      forget, statsCsv, mode: setMode, setting, feedback, goal: setGoal,
     });
     view.mode(mode); view.lab(false); view.setup(false);
     applyPrefs();
@@ -636,6 +648,6 @@ export function createSession({ view, win = globalThis.window, now = () => perfo
     return api;
   }
 
-  const api = { start, startWarmup, startCoached, openRecap, setting, setMode, feedback, forget, stats, firstWin, countIt, onEvent, addReminder, dispose() { stopTicker(); clearTimeout(st.forgetArmed); st.forgetArmed = null; cel.hush(); }, _tick: tick, _state: st };
+  const api = { start, startWarmup, startCoached, openRecap, setting, setMode, feedback, forget, stats, firstWin, countIt, onEvent, addReminder, setGoal, dispose() { stopTicker(); clearTimeout(st.forgetArmed); st.forgetArmed = null; cel.hush(); }, _tick: tick, _state: st };
   return api;
 }

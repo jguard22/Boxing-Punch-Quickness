@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync, readdirSync, statSync, existsSync } from "node:fs";
 import { join, relative } from "node:path";
-import { createMemoryStorage, createFirstWin, createSound, xpForNextLevel, FIRST_WIN_TARGET_MS } from "../src/vendor/fun-kit/index.js";
+import { getLabel, createMemoryStorage, createFirstWin, createSound, xpForNextLevel, FIRST_WIN_TARGET_MS } from "../src/vendor/fun-kit/index.js";
 import { APP, CURVE, XP, BADGES, DROPS, TITLES, FEATURES, PB_METRICS, FIRST_WIN, SOUND_PLANS, HIT_SOUND, JUDGMENT_SOUND, JUDGMENTS, GRADES, SPEED_TIERS, NEVER_WORDS, HAPTIC_VOCABULARY } from "../src/fun/config.js";
 import { COPY, allCopy } from "../src/fun/copy.js";
 import { makeKit, makeDemoKit, KIT_CONFIG, fmtSpeed, useSpeedUnit } from "../src/fun/kit.js";
@@ -329,4 +329,13 @@ test("the page stays usable without the fun layer: ?fun=0 and ?mode=lab show the
 test("the vendored kit has its VERSION and still matches the hygiene lint", () => {
   assert.ok(existsSync(join(root, "src/vendor/fun-kit/VERSION")));
   assert.match(read("src/vendor/fun-kit/VERSION"), /^bw-fun-kit \d+\.\d+\.\d+\ncommit [0-9a-f]{40}/);
+});
+
+test("the kit's welcome-back lines are this page's own: wrap up and warm up, best run safe, no shame", () => {
+  const short = getLabel("comebackShort"), long = getLabel("comebackLong", { previous: 4, unit: "weeks" });
+  assert.equal(short, "Welcome back. Wrap up and warm up.");
+  assert.match(long, /best run is safe/);
+  const kit = makeKit({ storage: createMemoryStorage() });
+  assert.deepEqual(kit.guard.lintCopy(short), []);
+  assert.deepEqual(kit.guard.lintCopy(long), []);
 });

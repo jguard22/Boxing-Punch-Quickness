@@ -299,9 +299,11 @@ export function createView() {
   }
 
   // ---- settings
-  function settings({ prefs, stats, firstWinMs, feedback }) {
+  function settings({ prefs, stats, firstWinMs, feedback, goal, goalNote }) {
     pressed($("seg-motion"), prefs.motion); pressed($("seg-sound"), prefs.sound); pressed($("seg-voice"), prefs.voice);
     pressed($("seg-calls"), prefs.calls); pressed($("seg-theme"), prefs.theme);
+    if (goal) pressed($("seg-goal"), String(goal.target));
+    setText($("goal-note"), goalNote || COPY.goal.help);
     pressed($("seg-feedback"), feedback ?? null);
     setText($("fb-note"), feedback ? `${COPY.feedback.settingsHelp} ${COPY.feedback.last(COPY.feedback[feedback] ?? feedback)}` : COPY.feedback.settingsHelp);
     const c = stats?.counts ?? {};
@@ -346,6 +348,7 @@ export function createView() {
       $(id)?.querySelectorAll("button").forEach((b) => b.addEventListener("click", () => actions.setting?.(key, b.dataset.v)));
     }
     $("seg-feedback")?.querySelectorAll("button").forEach((b) => b.addEventListener("click", () => actions.feedback?.(b.dataset.v)));
+    $("seg-goal")?.querySelectorAll("button").forEach((b) => b.addEventListener("click", () => actions.goal?.(Number(b.dataset.v))));
   }
   function forgetLabel(armed, done) {
     const b = $("btn-forget");

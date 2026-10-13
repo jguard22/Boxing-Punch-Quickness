@@ -3,8 +3,12 @@
 //   demoKit  a throwaway profile on memory storage for Simulate, so a demo can show a level-up and nothing from it persists
 //            (the one thing it hands to the real profile is the Welcome Bonus, through demoKit.awardToParent).
 // Instances are made on first use, so a page opened with ?fun=0 never touches storage.
-import { createFunKit, createMemoryStorage } from "../vendor/fun-kit/index.js";
+import { createFunKit, createMemoryStorage, setLabels } from "../vendor/fun-kit/index.js";
 import { APP, APP_NAME, CURVE, TITLES, WEEKLY, XP, BADGES, FEATURES, DROPS, PB_METRICS } from "./config.js";
+import { COPY } from "./copy.js";
+
+// The kit's welcome-back lines in this page's voice. A lapse is never a loss here: the best run is kept and the comeback pays a bonus.
+setLabels({ comebackLong: COPY.comeback.long, comebackShort: COPY.comeback.short });
 
 let speedUnit = () => "ms";
 /** The page's m/s or mph choice. Storage and the kit stay metric; only the words about a speed convert. */

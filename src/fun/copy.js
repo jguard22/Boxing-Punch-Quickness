@@ -149,6 +149,19 @@ export const COPY = {
 
   labelLab: { xp: "Label reviewed" },
 
+  comeback: {
+    long: "Welcome back. Wrap up and warm up. Your best run is safe, and you built {previous} {unit} of momentum before.",
+    short: "Welcome back. Wrap up and warm up.",
+  },
+
+  goal: {
+    label: "Sessions a week",
+    help: "Three is the default. Lowering it starts now, raising it starts next week, and past weeks keep the goal they were played under.",
+    now: (n) => `Goal set to ${n} a week, starting now.`,
+    next: (n) => `Goal set to ${n} a week, starting next week.`,
+    same: (n) => `Already ${n} a week.`,
+  },
+
   pbShelf: { title: "Personal bests", empty: "Bests count after your first minute of a session, never in the warm-up round." },
 
   book: {

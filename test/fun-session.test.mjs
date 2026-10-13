@@ -426,3 +426,18 @@ test("a session left on the page by the Lab view is not wiped silently: the hero
   assert.match(env.seen("hint").at(-1)[1], /export the CSV first/);
   assert.deepEqual(env.cmds.filter((c) => c.cmd === "reset"), [], "nothing was reset");
 });
+
+test("the weekly goal can be set to 1 to 5 sessions; lowering starts now, raising next week, and the ring follows", () => {
+  const env = makeEnv();
+  assert.equal(env.kit.streaks.goal(EPOCH).target, 3);
+  const up = env.session.setGoal(5);
+  assert.equal(up.ok, true);
+  assert.equal(up.applies, "next-week");
+  assert.match(env.seen("settings").at(-1)[1].goalNote, /5 a week, starting next week/);
+  const down = env.session.setGoal(2);
+  assert.equal(down.applies, "now");
+  assert.equal(env.kit.streaks.goal(EPOCH).target, 2);
+  assert.match(env.seen("settings").at(-1)[1].goalNote, /2 a week, starting now/);
+  assert.equal(env.session.setGoal(9).ok, false, "outside 1 to 5 is refused");
+  assert.equal(env.session.setGoal(0).ok, false);
+});
