@@ -100,9 +100,15 @@ Everything the page did before is still there: **Lab** in the header switches to
   full session +25. No XP per punch, no XP for relabelling or confirming a label, 12 rounds a day (then 1 XP a round), a 200 XP soft cap a day.
 - **Speed tiers** (Snap, Sharp, Steady, Easy) and speed bests exist only after the first minute of a session and never in the warm-up round.
   Speeds are stored in m/s and shown as m/s or mph (the header switch) everywhere.
-- **Recap** (three cards: Rounds, Combo highlight, Up next) after every set, with a one-tap *Loved it / Fine / Not for me* that stays on this device with the first-win time.
+- **Combo Book.** Appears after your first combo: eleven named pages (One-Two, Classic, Four Count, Up and Over, Corkscrew ...) and a hidden Alphabet page (`1-2-3-4-5-6` in one chain),
+  each with a count and the best way you landed it (free work, Counted, Good, Great, Perfect). Any combo you land is logged, named or not. Two badges: five different combos, all twelve pages.
+- **Personal bests** (card appears after your first scored round): top hand speed per punch type, best Round Grade, best Flow, longest chain. Speeds are stored in m/s and shown in your unit.
+- **Label Lab.** Reviewing a punch's label in the Punch Log pays a flat 1 XP (20 a session, once per punch). It pays the same whether you changed the auto label or confirmed it, *Mark all unreviewed
+  correct* and Simulate pay nothing, and no reward anywhere depends on agreeing or disagreeing with the auto label.
+- **Recap** (three cards: Rounds, Combo highlight, Up next; a fourth, Label Lab, once something was reviewed), with *Add my next session to my calendar* (a weekly `.ics` at the day and time you pick; nothing is sent) after every set, with a one-tap *Loved it / Fine / Not for me* that stays on this device with the first-win time.
 - **Simulate is a demo.** It runs on a second kit instance on memory storage: nothing it earns is saved except the one-time Welcome Bonus (+40 XP).
   The simulated boxer answers calls with a mix of exact, late, wrong-order and short throws so every judgment shows up.
+- **Weekly ring.** Three sessions a week by default (a full, non-warm-up round starts a session; only the first full round of a sitting counts), 1 to 5 in Settings. Lowering starts now, raising next week, and past weeks keep the goal they were played under. A lapse is a welcome-back with a bonus, never a loss.
 - **Settings** (all local): motion (follow the device, reduced, full), sounds, coach voice (off by default), coach calls, light / dark, the feedback tap,
   fun stats (counts only, CSV) and **Forget my data** (`kit.reset()`).
 - **Guardrails.** Bag and pad work only: copy never says damage, knockout, power or force. No haptics are sent in this build (TODO[SDK]); the rule is tested:

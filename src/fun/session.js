@@ -483,7 +483,8 @@ export function createSession({ view, win = globalThis.window, now = () => perfo
     if (fresh.some((a) => a.hidden)) cel.readout("alphabet");
     refreshBook(new Set(fresh.map((a) => a.str)));
     refreshPb();
-    view.gradeCard({ grade: grade.grade, score: grade.score, xp: bundle.xp, strong: grade.strong, warmup: warm, empty: !punches.length, parts: grade.parts, note });
+    const { calls: callsPts, pace: pacePts, ...rest } = grade.parts;          // calls count in a called round, pace in free work: show the one that applies
+    view.gradeCard({ grade: grade.grade, score: grade.score, xp: bundle.xp, strong: grade.strong, warmup: warm, empty: !punches.length, parts: grade.mode === "called" ? { calls: callsPts, ...rest } : { pace: pacePts, ...rest }, note });
     cel.readout("gradeSlam");
     if (grade.strong) cel.buzz("perfect");
     if (justWon) view.coach(COPY.coachMarks.won);

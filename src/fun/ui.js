@@ -145,11 +145,17 @@ export function createView() {
   }
 
   // ---- the last punch card
-  function punchPop() {
+  let speedCount = null;
+  function punchPop(type) {
     restartAnim($("last-type"), "pop");
     restartAnim($("combo-cur"), "pop");
     mirrorLast();
     restartAnim($("stage-last"), "pop");
+    if (type) restartAnim(document.querySelector(`#type-bars .tb.pt-${type} .fill`), "flash");       // the bar of that punch type flashes once
+    // the speed counts up to its value (the kit jumps straight to it under reduced motion)
+    const el = $("stage-speed"), to = parseFloat($("last-speed")?.textContent ?? "");
+    speedCount?.cancel();
+    speedCount = el && Number.isFinite(to) ? countUp(el, to, { from: 0, duration: 260, format: (v) => v.toFixed(1) }) : null;
   }
   function tier(t, type) {
     for (const id of ["last-tier", "stage-tier"]) {

@@ -136,6 +136,8 @@ button.sm { padding: var(--sp-1) var(--sp-3); font-size: var(--fs-sm); min-heigh
 .tier[data-t="easy"] { background: var(--panel-2); color: var(--muted); }
 .tier[data-t="steady"] { background: var(--fk-calm-soft); color: var(--blue-text); }
 .tier[data-t="snap"] { background: var(--fk-gold-soft); color: var(--amber-text); }
+.fill.flash { animation: flash var(--dur-pop) ease-out 1; }
+@keyframes flash { from { opacity: .3; } }
 #last-type.pop { animation: pop-in var(--dur-pop) var(--ease-spring) both; }
 .combo-str.pop { animation: pop-in var(--dur-pop) var(--ease-spring) both; }
 

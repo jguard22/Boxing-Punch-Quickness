@@ -441,3 +441,18 @@ test("the weekly goal can be set to 1 to 5 sessions; lowering starts now, raisin
   assert.equal(env.session.setGoal(9).ok, false, "outside 1 to 5 is refused");
   assert.equal(env.session.setGoal(0).ok, false);
 });
+
+test("the grade card shows the part that applies: pace in free work and the warm-up, coach calls in a called round", () => {
+  const env = makeEnv();
+  warmup(env);
+  assert.deepEqual(Object.keys(env.seen("gradeCard").at(-1)[1].parts), ["pace", "rhythm", "finish", "hands"]);
+  const env2 = makeEnv();
+  env2.startRound({ roundMs: 180000 });
+  env2.session._state.round.schedule = [{ atMs: 0, call: "1" }];
+  env2.session._tick();
+  const p = env2.throw({ startT: env2.t + 600, hand: "L", type: "jab" });
+  env2.t = p.t + 700; env2.session._tick();
+  for (let i = 0; i < 9; i++) { env2.t += 400; env2.throw({ startT: env2.t, hand: i % 2 ? "R" : "L", type: i % 2 ? "cross" : "jab" }); }
+  env2.endRound({ roundMs: 180000 });
+  assert.deepEqual(Object.keys(env2.seen("gradeCard").at(-1)[1].parts), ["calls", "rhythm", "finish", "hands"]);
+});

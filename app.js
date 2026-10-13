@@ -750,6 +750,7 @@
   $("punch-table").addEventListener("focusout", () => { if (S.tableDirty) setTimeout(renderAll, 0); });
   document.addEventListener("keydown", (e) => {
     if (e.code !== "Space" || /^(INPUT|SELECT|TEXTAREA|BUTTON)$/.test(e.target.tagName)) return;
+    if (!$("btn-go").offsetParent) return;      // the reaction drill is tucked away (Fight view): Space keeps scrolling the page
     e.preventDefault(); armGo();
   });
 

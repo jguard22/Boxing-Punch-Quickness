@@ -143,6 +143,7 @@ try {
   await page.screenshot({ path: path.join(OUT, "02-warmup.png"), fullPage: false });
 
   // the unit switch changes the stage speed too, stored value stays m/s
+  await page.waitForFunction(() => document.getElementById("stage-speed").textContent === document.getElementById("last-speed").textContent, null, { timeout: 3000 }).catch(() => {});   // let the count-up land
   const u = await page.evaluate(() => {
     const peak = window.__bwBoxing.S.punches.at(-1).peakV, ms = document.getElementById("stage-speed").textContent;
     document.querySelector('#units-seg button[data-unit="mph"]').click();
