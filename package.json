@@ -1,0 +1,11 @@
+{
+  "name": "boxing-punch-demo",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Brilliant Wear Boxing Punch Quickness demo (static page, no build)",
+  "scripts": {
+    "test": "node --test test/*.test.mjs",
+    "serve": "node scripts/serve.mjs",
+    "smoke": "node scripts/smoke.mjs"
+  }
+}
