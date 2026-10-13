@@ -4,135 +4,147 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Brilliant Wear — Boxing Punch Quickness Demo</title>
-<style>
-  :root {
-    --navy: #1a1f47; --navy-2: #12163a; --panel: #21265c; --panel-2: #2a3070;
-    --teal: #00d4aa; --teal-dim: #0aa88a; --amber: #ffb020; --red: #ff5468;
-    --blue: #4f8dff; --violet: #b06bff; --text: #eef1ff; --muted: #9aa3c7; --line: #343b7a;
-    font-size: 16px;
-  }
-  * { box-sizing: border-box; margin: 0; padding: 0; }
-  body {
-    font-family: -apple-system, "SF Pro Text", Inter, "Segoe UI", Roboto, sans-serif;
-    background: radial-gradient(1200px 600px at 70% -10%, #232a68 0%, var(--navy) 45%, var(--navy-2) 100%);
-    color: var(--text); min-height: 100vh; padding: 20px 24px 48px;
-  }
-  header { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between; margin-bottom: 18px; }
-  .brand { display: flex; align-items: baseline; gap: 10px; }
-  .brand h1 { font-size: 1.15rem; letter-spacing: .12em; font-weight: 700; }
-  .brand h1 .thin { color: var(--teal); font-weight: 500; }
-  .brand .sub { color: var(--muted); font-size: .85rem; }
-  .controls { display: flex; flex-wrap: wrap; gap: 8px; }
-  button {
-    background: var(--panel); color: var(--text); border: 1px solid var(--line);
-    padding: 9px 14px; border-radius: 9px; font-size: .85rem; cursor: pointer; transition: all .15s;
-  }
-  button:hover { border-color: var(--teal); }
-  button.primary { background: var(--teal); border-color: var(--teal); color: #06251d; font-weight: 650; }
-  button.connected { background: var(--teal-dim); border-color: var(--teal-dim); color: #04211a; font-weight: 650; }
-  button.armed { background: var(--amber); border-color: var(--amber); color: #2a1a02; font-weight: 700; animation: pulse 1s ease-in-out infinite; }
-  @keyframes pulse { 0%,100% { box-shadow: 0 0 0 0 rgba(255,176,32,.5); } 50% { box-shadow: 0 0 0 8px rgba(255,176,32,0); } }
-  .grid { display: grid; gap: 14px; grid-template-columns: repeat(12, 1fr); }
-  .card {
-    grid-column: span 4; background: linear-gradient(180deg, var(--panel) 0%, rgba(33,38,92,.6) 100%);
-    border: 1px solid var(--line); border-radius: 14px; padding: 16px 16px 14px; min-height: 120px;
-  }
-  .card h2 { font-size: .72rem; letter-spacing: .14em; text-transform: uppercase; color: var(--muted); margin-bottom: 10px; display: flex; justify-content: space-between; }
-  .card h2 .tag { color: var(--teal); text-transform: none; letter-spacing: 0; }
-  .big { font-size: 2.2rem; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1; }
-  .unit { font-size: .85rem; color: var(--muted); margin-left: 4px; }
-  .sub2 { color: var(--muted); font-size: .8rem; margin-top: 6px; }
-  .span6 { grid-column: span 6 !important; }
-  .span8 { grid-column: span 8 !important; }
-  .span12 { grid-column: span 12 !important; }
-  @media (max-width: 1100px) { .card, .span6, .span8 { grid-column: span 12 !important; } }
-  table { width: 100%; border-collapse: collapse; font-size: .8rem; margin-top: 8px; }
-  th, td { text-align: left; padding: 5px 8px; border-bottom: 1px solid rgba(52,59,122,.6); font-variant-numeric: tabular-nums; }
-  th { color: var(--muted); font-weight: 600; font-size: .68rem; text-transform: uppercase; letter-spacing: .1em; }
-  td select { background: var(--navy-2); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 3px 6px; font-size: .78rem; }
-  .row { display: flex; gap: 18px; flex-wrap: wrap; }
-  .kv { min-width: 100px; }
-  .kv .v { font-size: 1.35rem; font-weight: 700; font-variant-numeric: tabular-nums; }
-  .kv .k { color: var(--muted); font-size: .72rem; text-transform: uppercase; letter-spacing: .1em; }
-  .punch-badge { display: inline-block; padding: 4px 14px; border-radius: 99px; font-size: 1rem; font-weight: 800; letter-spacing: .08em; }
-  .pt-jab { background: rgba(0,212,170,.18); color: var(--teal); }
-  .pt-cross { background: rgba(79,141,255,.18); color: var(--blue); }
-  .pt-hook { background: rgba(255,176,32,.18); color: var(--amber); }
-  .pt-uppercut { background: rgba(176,107,255,.18); color: var(--violet); }
-  .hand-badge { display: inline-block; padding: 2px 10px; border-radius: 99px; font-size: .72rem; font-weight: 800; margin-left: 8px; vertical-align: middle; }
-  .hand-L { background: rgba(0,212,170,.18); color: var(--teal); }
-  .hand-R { background: rgba(79,141,255,.18); color: var(--blue); }
-  .type-bars { display: flex; flex-direction: column; gap: 7px; margin-top: 6px; }
-  .type-bars .tb { display: grid; grid-template-columns: 74px 1fr 30px; align-items: center; gap: 8px; font-size: .76rem; }
-  .type-bars .track { height: 10px; border-radius: 99px; background: var(--panel-2); overflow: hidden; }
-  .type-bars .fill { height: 100%; border-radius: 99px; }
-  .go-light { width: 58px; height: 58px; border-radius: 50%; margin: 0 auto 10px; background: var(--panel-2); border: 2px solid var(--line); transition: all .1s; }
-  .go-light.armed { background: #5a4a12; border-color: var(--amber); }
-  .go-light.go { background: var(--teal); border-color: var(--teal); box-shadow: 0 0 30px rgba(0,212,170,.8); }
-  #log { font-size: .74rem; color: var(--muted); max-height: 110px; overflow-y: auto; line-height: 1.5; }
-  #log .bad { color: var(--red); } #log .warn { color: var(--amber); } #log .ok { color: var(--teal); }
-  footer { margin-top: 20px; color: var(--muted); font-size: .75rem; }
-  footer a { color: var(--teal); }
-  .note { font-size: .72rem; color: var(--muted); margin-top: 8px; line-height: 1.45; }
-</style>
+<link rel="stylesheet" href="styles.css?v=3" />
 </head>
 <body>
 <header>
   <div class="brand">
     <h1>BRILLIANT<span class="thin">WEAR</span></h1>
-    <span class="sub">Boxing Punch Quickness — speed · type · reaction</span>
+    <span class="sub">Boxing Punch Quickness — speed · type · combos · rounds</span>
   </div>
   <div class="controls">
     <button id="btn-left">Connect Left Wrist</button>
     <button id="btn-right">Connect Right Wrist</button>
+    <button id="btn-insoles" title="Optional — adds weight transfer per punch">Connect Insoles (optional)</button>
     <button id="btn-stance">Stance: Orthodox</button>
     <button id="btn-sim">Simulate</button>
-    <button id="btn-export">Export CSV</button>
+    <label class="toggle" title="Simulate the insole channel too"><input type="checkbox" id="sim-insoles" checked /> sim insoles</label>
+    <label class="toggle" title="In Simulate, tag every punch with the type the generator threw so the confusion matrix fills in"><input type="checkbox" id="sim-truth" checked /> sim labels truth</label>
+    <span class="seg-label">Speed</span>
+    <div class="seg" id="units-seg" role="group" aria-label="Speed units">
+      <button data-unit="ms" class="on" aria-pressed="true">m/s</button><button data-unit="mph" aria-pressed="false">mph</button>
+    </div>
+    <button id="btn-export">Export Punches CSV</button>
+    <button id="btn-export-rounds">Export Rounds CSV</button>
+    <button id="btn-reset" class="danger">Reset session</button>
   </div>
 </header>
 
 <div class="grid">
+  <!-- round clock -->
   <div class="card">
-    <h2>Last Punch <span class="tag">auto-classified</span></h2>
-    <div style="margin:4px 0 10px;">
-      <span class="punch-badge pt-jab" id="last-type">—</span>
-      <span class="hand-badge hand-L" id="last-hand" style="display:none">L</span>
+    <h2>Rounds <span class="tag" id="clock-sub">3 min round · 1 min rest</span></h2>
+    <div class="clock" id="clock">
+      <div class="clock-phase" id="clock-phase">Ready</div>
+      <div class="clock-time" id="clock-time">3:00</div>
+      <div class="progress"><i id="clock-bar"></i></div>
     </div>
     <div class="row">
-      <div class="kv"><div class="v"><span id="last-speed">—</span><span class="unit">m/s</span></div><div class="k">hand speed</div></div>
-      <div class="kv"><div class="v"><span id="last-mph">—</span><span class="unit">mph</span></div><div class="k">peak</div></div>
+      <button class="primary" id="btn-rounds">Start Rounds</button>
+      <label class="toggle"><input type="checkbox" id="set-bell" checked /> bell</label>
+    </div>
+    <div class="settings">
+      <label>Round (min)<input type="number" id="set-round" min="0.1" max="10" step="0.05" value="3" /></label>
+      <label>Rest (min)<input type="number" id="set-rest" min="0.05" max="5" step="0.05" value="1" /></label>
+      <label>Rounds<input type="number" id="set-rounds" min="1" max="12" step="1" value="3" /></label>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Last Punch <span class="tag">auto-classified</span></h2>
+    <div class="last-head">
+      <span class="badge pt-jab" id="last-type">—</span>
+      <span class="badge sm hand-badge hand-L" id="last-hand" hidden>L</span>
+    </div>
+    <div class="row">
+      <div class="kv"><div class="v"><span id="last-speed">—</span><span class="unit u-speed">m/s</span></div><div class="k">hand speed</div></div>
       <div class="kv"><div class="v"><span id="last-g">—</span><span class="unit">g</span></div><div class="k">peak accel</div></div>
+      <div class="kv"><div class="v" id="last-combo">—</div><div class="k">in combo</div></div>
     </div>
   </div>
 
   <div class="card">
     <h2>Punch Count <span class="tag" id="rate">0 /min</span></h2>
     <div><span class="big" id="count-total">0</span><span class="unit">total</span></div>
-    <div class="sub2">L <b id="count-L">0</b> · R <b id="count-R">0</b> · best <b id="best-speed">—</b> m/s</div>
+    <div class="sub2">L <b id="count-L">0</b> · R <b id="count-R">0</b> · best <b id="best-speed">—</b> <span class="u-speed">m/s</span></div>
+    <div class="type-bars" id="type-bars"></div>
+  </div>
+
+  <!-- combos / weight transfer / reaction -->
+  <div class="card">
+    <h2>Combos <span class="tag" id="combo-count">0 combos</span></h2>
+    <div class="combo-str" id="combo-cur">—</div>
+    <div class="combo-names" id="combo-names">latest combination, boxing numbers</div>
+    <div class="sub2">longest <b id="combo-longest">—</b> · singles <b id="combo-singles">0</b></div>
+    <div class="top-combos" id="top-combos"></div>
+    <div class="note">1 jab · 2 cross · 3/4 lead/rear hook · 5/6 lead/rear uppercut. Punches under 600 ms apart chain into one combo.</div>
   </div>
 
   <div class="card">
-    <h2>Type Breakdown</h2>
-    <div class="type-bars" id="type-bars"></div>
+    <h2>Weight Transfer <span class="tag"><span class="chip" id="wt-state">no insoles</span></span></h2>
+    <div class="row">
+      <div class="kv"><div class="v"><span id="wt-last">—</span><span class="unit">pp</span></div><div class="k">last punch</div></div>
+      <div class="kv"><div class="v"><span id="wt-straight">—</span><span class="unit">pp</span></div><div class="k">straights avg</div></div>
+    </div>
+    <div class="gauge" id="wt-gauge"><i id="wt-fill"></i></div>
+    <div class="gauge-legend"><span>← back foot</span><span>front foot →</span></div>
+    <div class="sub2" id="wt-types">Connect insoles (or Simulate with sim insoles) for front/back foot load shift per punch.</div>
   </div>
 
   <div class="card">
     <h2>Reaction Drill <span class="tag">beep → punch</span></h2>
     <div class="go-light" id="go-light"></div>
-    <div style="text-align:center;"><button class="primary" id="btn-go">Arm GO (space)</button></div>
-    <div class="row" style="justify-content:center; margin-top:10px;">
+    <div class="row center"><button class="primary" id="btn-go">Arm GO (space)</button></div>
+    <div class="row center react-row">
       <div class="kv"><div class="v" id="react-ms">—</div><div class="k">beep→impact ms</div></div>
       <div class="kv"><div class="v" id="react-best">—</div><div class="k">best</div></div>
     </div>
   </div>
 
-  <div class="card span8">
+  <!-- summary -->
+  <div class="card span12" id="summary-card">
+    <h2>Session Summary <span class="tag" id="summary-tag">waiting for punches</span></h2>
+    <div class="kpis" id="kpis"></div>
+    <div class="notes" id="notes"></div>
+    <div class="row summary-actions">
+      <button id="btn-copy" class="ghost">Copy summary</button>
+      <span class="note flat" id="copy-state"></span>
+    </div>
+  </div>
+
+  <!-- per round -->
+  <div class="card span12">
+    <h2>Per-Round Output <span class="tag">speed shown as mean / peak</span></h2>
+    <div class="scroll" id="round-wrap"></div>
+  </div>
+
+  <!-- fatigue + confusion -->
+  <div class="card span5">
+    <h2>Fatigue Curve <span class="tag" id="fx-tag">% of first round</span></h2>
+    <div id="fx-wrap"></div>
+    <div class="legend"><span><i class="s"></i>hand speed</span><span><i class="r"></i>punches / min</span></div>
+    <div class="note">Mean hand speed and output per round, indexed to the first round (100%). Needs two rounds with 3+ punches each.</div>
+  </div>
+
+  <div class="card span7">
+    <h2>Confusion Matrix <span class="tag" id="cm-tag">0 reviewed</span></h2>
+    <div id="cm-wrap"></div>
+    <div class="row cm-actions">
+      <button id="btn-confirm-all" class="ghost">Mark all unreviewed correct</button>
+    </div>
+    <div class="note">Rows = what you say it was, columns = what the heuristic called it. Only punches you reviewed count — "✓ correct" confirms the auto label.</div>
+  </div>
+
+  <!-- punch log -->
+  <div class="card span12">
     <h2>Punch Log <span class="tag">correct the type if the auto-label is wrong — trains the classifier</span></h2>
-    <table id="punch-table">
-      <thead><tr><th>#</th><th>hand</th><th>auto type</th><th>speed m/s</th><th>accel g</th><th>rot °</th><th>vert %</th><th>gap ms</th><th>true type</th></tr></thead>
-      <tbody></tbody>
-    </table>
-    <div class="note">v1 heuristic: vertical-dominant rise ⇒ uppercut · high rotation/curvature ⇒ hook · else straight (jab = lead hand, cross = rear, from stance). Every punch logs its feature vector to CSV for the ML classifier.</div>
+    <div class="scroll tall">
+      <table id="punch-table">
+        <thead><tr><th>#</th><th>rnd</th><th>hand</th><th>combo</th><th>auto type</th><th>speed <span class="u-speed">m/s</span></th><th>accel g</th><th>rot °</th><th>vert %</th><th>shift pp</th><th>gap ms</th><th>true type</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+    <div class="note">v1 heuristic: vertical-dominant rise ⇒ uppercut · high rotation/curvature ⇒ hook · else straight (jab = lead hand, cross = rear, from stance). Every punch logs its feature vector to CSV for the ML classifier. Showing the latest 60; the CSV has all of them.</div>
   </div>
 
   <div class="card span12">
@@ -143,10 +155,12 @@
 
 <footer>
   Live over Web Bluetooth via the <a href="https://github.com/brilliantsole/BrilliantWear-JavaScript-SDK">Brilliant Wear JavaScript SDK</a>.
-  Two wrist-worn Sense units (L + R). Simulate exercises the full UI with no hardware.
+  Two wrist-worn Sense units (L + R), plus optional insoles. Simulate exercises the full UI with no hardware.
+  Estimates are training and performance summaries — not medical measurements.
 </footer>
 
 <script src="https://unpkg.com/brilliantsole@latest/build/brilliantsole.js"></script>
-<script src="app.js?v=1"></script>
+<script src="core.js?v=3"></script>
+<script src="app.js?v=3"></script>
 </body>
 </html>

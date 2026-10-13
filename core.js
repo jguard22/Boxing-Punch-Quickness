@@ -96,6 +96,7 @@
 
     function acc(hand, a, t) {
       const h = hands[hand];
+      if (h.lastT != null && t <= h.lastT) return null; // out-of-order / duplicate sample
       const dt = h.lastT == null ? 0 : Math.min(0.03, (t - h.lastT) / 1000);
       h.lastT = t;
       if (!dt) return null;
@@ -342,8 +343,10 @@
     else if (punches.length >= 2) activeMs = Math.max(0, punches[punches.length - 1].t - punches[0].startT);
     else activeMs = 0;
     const total = summarize(punches, activeMs);
-    if (!rounds.length && activeMs < 20000) total.perMin = null; // too short to be a meaningful rate
-    return { rounds: perRound, total, fatigue: fatigueCurve(perRound), inRounds: punches.filter((p) => p.round > 0).length };
+    const inRounds = punches.filter((p) => p.round > 0).length;
+    if (rounds.length) total.perMin = activeMs > 0 ? inRounds / (activeMs / 60000) : null; // output while the clock was live
+    else if (activeMs < 20000) total.perMin = null; // free work too short to be a meaningful rate
+    return { rounds: perRound, total, fatigue: fatigueCurve(perRound), inRounds };
   }
 
   // Output and hand speed per round, as % of the first round with enough data.
@@ -455,8 +458,8 @@
     return nums.map((n) => map[n]);
   }
   const SIM_COMBOS = [
-    [[1], 4], [[2], 2], [[1, 2], 9], [[1, 1, 2], 5], [[1, 2, 3], 7], [[1, 2, 3, 2], 5], [[1, 2, 5, 2], 3],
-    [[2, 3, 2], 3], [[1, 6, 3, 2], 2], [[3, 4], 2], [[1, 2, 1, 2], 3],
+    [[1], 4], [[2], 2], [[1, 2], 8], [[1, 1, 2], 5], [[1, 2, 3], 6], [[1, 2, 3, 2], 5], [[1, 2, 5, 2], 5],
+    [[2, 3, 2], 3], [[1, 6, 3, 2], 4], [[3, 4], 2], [[1, 2, 1, 2], 3], [[5, 2], 3], [[2, 6, 3], 2],
   ];
   function pickCombo(rng) {
     const total = SIM_COMBOS.reduce((a, c) => a + c[1], 0);

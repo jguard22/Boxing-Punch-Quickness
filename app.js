@@ -1,128 +1,103 @@
-/* Brilliant Wear — Boxing Punch Quickness Demo (first draft)
-   Two wrist-worn Sense units. Detects punches from wrist linear acceleration,
-   integrates a short window for peak hand speed, and AUTO-CLASSIFIES the
-   punch type (jab / cross / hook / uppercut) with a labeled v1 heuristic:
+/* Brilliant Wear — Boxing Punch Quickness Demo
+   Two wrist-worn Sense units (+ optional insoles). Wrist linear acceleration →
+   punch windows → integrated peak hand speed → auto punch type (jab / cross /
+   hook / uppercut) → combos, rounds, weight transfer, fatigue and a confusion
+   matrix from the labels you correct.
 
-     · net displacement mostly upward            → uppercut
-     · large yaw rotation or curved path         → hook
-     · otherwise straight                        → jab (lead hand) / cross (rear)
-
-   Lead vs rear comes from the stance toggle (Orthodox = left lead). Every
-   punch logs its feature vector (speed, accel, rotation, vertical fraction,
-   curvature) + a correctable "true type" → CSV, so the heuristic's labels
-   become the ML classifier's training set. SDK touchpoints in SDKAdapter. */
+   Detection / classification / stats live in core.js (BPCore, unit-tested in
+   node). This file is the UI, the clock, the audio, CSV, the SDK adapter and
+   the Simulate engine. Every hardware touchpoint is in SDKAdapter (TODO[SDK]
+   marks event names to verify on real hardware). Speeds are stored and
+   exported in m/s; only the display converts to mph. */
 
 (() => {
   "use strict";
+  const C = window.BPCore;
+  const { TYPES } = C;
 
-  const CFG = {
-    rateMs: 5,                 // 200 Hz — punches are ~120-250 ms events
-    startG: 2.0,               // |linAcc| onset threshold (g)
-    endG: 0.8,                 // below this = punch over
-    maxPunchMs: 450,
-    refractoryMs: 250,
-    vertFrac: 0.5,             // upward displacement share ⇒ uppercut
-    hookYawDeg: 40,            // |yaw change| ⇒ hook
-    hookCurve: 1.6,            // path length / net displacement ⇒ hook
-    goDelayMinMs: 1200, goDelayMaxMs: 3200,
-  };
-  const G = 9.80665;
+  const CFG = { ...C.DEFAULTS, goDelayMinMs: 1200, goDelayMaxMs: 3200, tableRows: 60, simPumpMs: 4, insoleHoldMs: 1500, simAmbiguous: 0.12 };
 
   const S = {
-    stance: "orthodox",        // orthodox: L lead · southpaw: R lead
-    hands: { L: mkHand(), R: mkHand() },
-    punches: [], counts: { L: 0, R: 0 },
-    typeCounts: { jab: 0, cross: 0, hook: 0, uppercut: 0 },
+    stance: "orthodox",          // orthodox: L lead · southpaw: R lead
+    unit: "ms",                  // display only: "ms" | "mph"
+    punches: [], combos: [],
+    rounds: [],                  // [{n, startT, endT|null}]
+    clock: null, sessionDone: false,
+    settings: { roundMin: 3, restMin: 1, rounds: 3 },
+    bell: true,
     go: { armed: false, at: null, timer: null, best: null },
-    sim: false, simTimer: null,
-    audio: null,
+    insole: { buf: [], load: { left: 0, right: 0 }, last: { left: -Infinity, right: -Infinity } },
+    sim: false, simInsoles: true, simTruth: true,
+    audio: null, tableDirty: false, resetTimer: null, tick: 0,
   };
-  function mkHand() {
-    return { connected: false, q: null, q0: null, lastT: 0, active: false,
-             start: 0, v: [0, 0, 0], d: [0, 0, 0], path: 0, peakV: 0, peakA: 0, lastEnd: 0 };
-  }
   const now = () => performance.now();
   const $ = (id) => document.getElementById(id);
-  const TYPE_COLORS = { jab: "var(--teal)", cross: "var(--blue)", hook: "var(--amber)", uppercut: "var(--violet)" };
+  const lead = () => (S.stance === "orthodox" ? "L" : "R");
+  const leadSide = () => (lead() === "L" ? "left" : "right");
+  const fs = (v, d = 1) => C.fmtSpeed(v, S.unit, d);
+  const sgn = (v, d = 0) => (v == null ? "—" : `${v > 0 ? "+" : v < 0 ? "−" : ""}${Math.abs(v).toFixed(d)}`);
+  const pct = (v, d = 0) => (v == null ? "—" : `${v.toFixed(d)}%`);
+
   function log(msg, cls = "") {
-    $("log").insertAdjacentHTML("afterbegin", `<div class="${cls}">${new Date().toLocaleTimeString()} — ${msg}</div>`);
+    const el = $("log");
+    el.insertAdjacentHTML("afterbegin", `<div class="${cls}">${new Date().toLocaleTimeString()} — ${msg}</div>`);
+    while (el.childElementCount > 200) el.lastElementChild.remove();
   }
 
-  // ---------- math ----------
-  function quatRotate(q, v) {
-    const { x, y, z, w } = q;
-    const [vx, vy, vz] = v;
-    const tx = 2 * (y * vz - z * vy), ty = 2 * (z * vx - x * vz), tz = 2 * (x * vy - y * vx);
-    return [vx + w * tx + (y * tz - z * ty), vy + w * ty + (z * tx - x * tz), vz + w * tz + (x * ty - y * tx)];
+  // ---------- per-browser prefs (units, timer settings) ----------
+  const PREF_KEY = "bw-boxing-prefs-v1";
+  function loadPrefs() {
+    try {
+      const p = JSON.parse(localStorage.getItem(PREF_KEY) || "{}");
+      if (p.unit === "ms" || p.unit === "mph") S.unit = p.unit;
+      if (p.settings) Object.assign(S.settings, p.settings);
+      if (typeof p.bell === "boolean") S.bell = p.bell;
+    } catch { /* storage unavailable */ }
+    const q = new URLSearchParams(location.search);       // ?round=0.15&rest=0.05&rounds=3&unit=mph (handy for demos / tests)
+    if (q.get("round")) S.settings.roundMin = Number(q.get("round"));
+    if (q.get("rest")) S.settings.restMin = Number(q.get("rest"));
+    if (q.get("rounds")) S.settings.rounds = Number(q.get("rounds"));
+    if (q.get("unit") === "mph" || q.get("unit") === "ms") S.unit = q.get("unit");
   }
-  function yawDeg(q0, q1) {
-    if (!q0 || !q1) return 0;
-    const yaw = (q) => Math.atan2(2 * (q.w * q.z + q.x * q.y), 1 - 2 * (q.y * q.y + q.z * q.z));
-    let d = (yaw(q1) - yaw(q0)) * 180 / Math.PI;
-    if (d > 180) d -= 360; if (d < -180) d += 360;
-    return d;
-  }
-
-  // ---------- punch detection + classification ----------
-  function onQuat(hand, q) { S.hands[hand].q = q; }
-  function onAcc(hand, a, t) {
-    const h = S.hands[hand];
-    const dt = h.lastT ? Math.min(0.03, (t - h.lastT) / 1000) : 0;
-    h.lastT = t;
-    if (!dt) return;
-    const world = h.q ? quatRotate(h.q, [a.x, a.y, a.z]) : [a.x, a.y, a.z];
-    const mag = Math.hypot(...world);
-
-    if (!h.active) {
-      if (mag > CFG.startG * G && t - h.lastEnd > CFG.refractoryMs) {
-        h.active = true; h.start = t; h.q0 = h.q ? { ...h.q } : null;
-        h.v = [0, 0, 0]; h.d = [0, 0, 0]; h.path = 0; h.peakV = 0; h.peakA = 0;
-      }
-      return;
-    }
-    // inside a punch window: integrate from assumed rest at onset
-    for (let i = 0; i < 3; i++) { h.v[i] += world[i] * dt; h.d[i] += h.v[i] * dt; }
-    const speed = Math.hypot(...h.v);
-    h.path += speed * dt;
-    if (speed > h.peakV) h.peakV = speed;
-    if (mag > h.peakA) h.peakA = mag;
-
-    const done = mag < CFG.endG * G || t - h.start > CFG.maxPunchMs;
-    if (done) {
-      h.active = false; h.lastEnd = t;
-      finishPunch(hand, h, t);
-    }
+  function savePrefs() {
+    try { localStorage.setItem(PREF_KEY, JSON.stringify({ unit: S.unit, settings: S.settings, bell: S.bell })); } catch { /* ignore */ }
   }
 
-  function classify(hand, feat) {
-    // TODO[SDK]: verify world-frame up axis on hardware (assumed z-up here)
-    if (feat.vertFrac > CFG.vertFrac && feat.up > 0) return "uppercut";
-    if (Math.abs(feat.rotDeg) > CFG.hookYawDeg || feat.curve > CFG.hookCurve) return "hook";
-    const lead = S.stance === "orthodox" ? "L" : "R";
-    return hand === lead ? "jab" : "cross";
+  // ---------- detection → punch records ----------
+  const detector = C.createDetector({ cfg: CFG, getLead: lead, onPunch: handlePunch });
+
+  function insolePresent() {
+    const t = now();
+    return t - S.insole.last.left < CFG.insoleHoldMs && t - S.insole.last.right < CFG.insoleHoldMs;
+  }
+  function onLoad(side, v, t) {
+    S.insole.load[side] = v;
+    S.insole.last[side] = t;
+    S.insole.buf.push([t, S.insole.load.left, S.insole.load.right]);
+    while (S.insole.buf.length && t - S.insole.buf[0][0] > 3000) S.insole.buf.shift();
   }
 
-  function finishPunch(hand, h, t) {
-    if (h.peakV < 1.2 || h.path < 0.15) return; // arm wiggle, not a punch
-    const net = Math.hypot(...h.d);
-    const feat = {
-      durMs: Math.round(t - h.start),
-      peakV: h.peakV, peakG: h.peakA / G,
-      up: h.d[2], vertFrac: net > 0 ? Math.abs(h.d[2]) / net : 0,
-      curve: net > 0.02 ? h.path / net : 1,
-      rotDeg: yawDeg(h.q0, h.q),
-    };
-    const type = classify(hand, feat);
+  function handlePunch(raw) {
     const prev = S.punches[S.punches.length - 1];
+    const ph = S.clock ? S.clock.phaseAt(raw.startT) : null;
     const p = {
-      n: S.punches.length + 1, hand, type, trueType: null, t,
-      gapMs: prev ? Math.round(t - prev.t) : null, ...feat,
+      ...raw, n: S.punches.length + 1, trueType: null,
+      gapMs: prev ? Math.max(0, Math.round(raw.startT - prev.t)) : null,
+      round: ph && ph.phase === "round" ? ph.n : 0,
+      shiftPp: null, frontPct: null,
     };
+    if (insolePresent()) {
+      const w = C.weightShift(S.insole.buf, raw.startT, raw.t, raw.lead === "L" ? "left" : "right", CFG);
+      if (w) { p.shiftPp = w.shiftPp; p.frontPct = w.frontPct; }
+    }
+    if (S.sim && S.simTruth) {                       // generator knows what it threw
+      const q = Sim.expect[raw.hand];
+      while (q.length && q[0].t < raw.startT - 300) q.shift();
+      if (q.length && Math.abs(q[0].t - raw.startT) < 300) p.trueType = q.shift().truth;
+    }
     S.punches.push(p);
-    S.counts[hand]++;
-    S.typeCounts[type]++;
     if (S.go.at != null) {
-      const r = Math.round(t - S.go.at);
+      const r = Math.round(raw.t - S.go.at);
       S.go.at = null;
       S.go.best = S.go.best == null ? r : Math.min(S.go.best, r);
       $("react-ms").textContent = r;
@@ -130,39 +105,322 @@
       $("go-light").className = "go-light";
       $("btn-go").classList.remove("armed");
     }
-    render(p);
+    renderAll();
   }
 
-  function render(p) {
-    $("last-type").textContent = p.type.toUpperCase();
-    $("last-type").className = `punch-badge pt-${p.type}`;
-    const hb = $("last-hand");
-    hb.style.display = "inline-block";
-    hb.textContent = p.hand;
-    hb.className = `hand-badge hand-${p.hand}`;
-    $("last-speed").textContent = p.peakV.toFixed(1);
-    $("last-mph").textContent = (p.peakV * 2.23694).toFixed(0);
-    $("last-g").textContent = p.peakG.toFixed(1);
-    $("count-total").textContent = S.punches.length;
-    $("count-L").textContent = S.counts.L;
-    $("count-R").textContent = S.counts.R;
-    $("best-speed").textContent = Math.max(...S.punches.map((x) => x.peakV)).toFixed(1);
-    const winStart = p.t - 60000;
-    const inWin = S.punches.filter((x) => x.t >= winStart).length;
-    $("rate").textContent = `${inWin} /min`;
-    $("type-bars").innerHTML = Object.entries(S.typeCounts).map(([k, v]) => {
-      const max = Math.max(...Object.values(S.typeCounts), 1);
-      return `<div class="tb"><span>${k}</span><div class="track"><div class="fill" style="width:${(v / max) * 100}%;background:${TYPE_COLORS[k]}"></div></div><b>${v}</b></div>`;
-    }).join("");
-    $("punch-table").querySelector("tbody").insertAdjacentHTML("afterbegin",
-      `<tr><td>${p.n}</td><td>${p.hand}</td><td>${p.type}</td><td>${p.peakV.toFixed(1)}</td><td>${p.peakG.toFixed(1)}</td>
-       <td>${Math.round(p.rotDeg)}</td><td>${Math.round(p.vertFrac * 100)}</td><td>${p.gapMs ?? "—"}</td>
-       <td><select data-punch="${p.n}"><option value="">✓ auto</option><option>jab</option><option>cross</option><option>hook</option><option>uppercut</option></select></td></tr>`);
-    $("punch-table").querySelector("select").addEventListener("change", (e) => {
-      const punch = S.punches.find((x) => x.n === Number(e.target.dataset.punch));
-      if (punch) { punch.trueType = e.target.value || null; if (punch.trueType) log(`Punch ${punch.n}: corrected ${punch.type} → ${punch.trueType}.`); }
+  // ---------- rendering ----------
+  let session = null;
+  const effType = C.effType;
+
+  function renderUnits() {
+    document.querySelectorAll(".u-speed").forEach((e) => { e.textContent = C.speedLabel(S.unit); });
+    document.querySelectorAll("#units-seg button").forEach((b) => {
+      const on = b.dataset.unit === S.unit;
+      b.classList.toggle("on", on);
+      b.setAttribute("aria-pressed", String(on));
     });
   }
+
+  function renderAll() {
+    S.combos = C.annotateCombos(S.punches, CFG.comboGapMs);
+    session = C.buildSession(S.punches, S.rounds, now());
+    renderLive();
+    renderCombos();
+    renderWeight();
+    renderTable();
+    renderStats();
+  }
+  // the parts that also change with the clock (open round duration)
+  function renderStats() {
+    if (!session || S.tick % 10 === 0) session = C.buildSession(S.punches, S.rounds, now());
+    renderRounds();
+    renderFatigue();
+    renderConfusion();
+    renderSummary();
+  }
+
+  function renderLive() {
+    const last = S.punches[S.punches.length - 1];
+    const t = session.total;
+    if (!last) {
+      $("last-type").textContent = "—"; $("last-type").className = "badge pt-jab";
+      $("last-hand").hidden = true;
+      for (const id of ["last-speed", "last-g", "last-combo"]) $(id).textContent = "—";
+    } else {
+      const type = effType(last);
+      $("last-type").textContent = type.toUpperCase();
+      $("last-type").className = `badge pt-${type}`;
+      const hb = $("last-hand");
+      hb.hidden = false; hb.textContent = last.hand; hb.className = `badge sm hand-badge hand-${last.hand}`;
+      $("last-speed").textContent = fs(last.peakV);
+      $("last-g").textContent = last.peakG.toFixed(1);
+      $("last-combo").textContent = S.combos[last.combo - 1]?.str ?? "—";
+    }
+    $("count-total").textContent = S.punches.length;
+    $("count-L").textContent = t.nL;
+    $("count-R").textContent = t.nR;
+    $("best-speed").textContent = fs(t.peakV);
+    renderRate();
+    const counts = Object.fromEntries(TYPES.map((k) => [k, t.byType[k].n]));
+    const max = Math.max(...Object.values(counts), 1);
+    $("type-bars").innerHTML = TYPES.map((k) =>
+      `<div class="tb pt-${k}"><span>${k}</span><div class="track"><div class="fill" style="width:${(counts[k] / max) * 100}%"></div></div><b>${counts[k]}</b></div>`).join("");
+  }
+  function renderRate() {
+    const since = now() - 60000;
+    $("rate").textContent = `${S.punches.filter((x) => x.t >= since).length} /min`;
+  }
+
+  function renderCombos() {
+    const cur = S.combos[S.combos.length - 1];
+    $("combo-cur").textContent = cur ? cur.str : "—";
+    $("combo-names").textContent = cur ? C.describeCombo(cur.str) : "latest combination, boxing numbers";
+    const t = session.total;
+    $("combo-count").textContent = `${t.combos} combo${t.combos === 1 ? "" : "s"}`;
+    $("combo-longest").textContent = t.longest ? `${t.longestStr} (${t.longest})` : "—";
+    $("combo-singles").textContent = t.singles;
+    $("top-combos").innerHTML = t.topCombos.length
+      ? t.topCombos.map((c) => `<div class="tc"><span>${c.str}</span><b>×${c.count}</b></div>`).join("")
+      : `<div class="empty">Top combinations appear here.</div>`;
+  }
+
+  function renderWeight() {
+    const present = insolePresent();
+    const chip = $("wt-state");
+    chip.textContent = present ? (S.sim && S.simInsoles ? "sim insoles" : "insoles live") : "no insoles";
+    chip.classList.toggle("on", present);
+    const last = S.punches[S.punches.length - 1];
+    const v = last?.shiftPp ?? null;
+    $("wt-last").textContent = sgn(v, 1);
+    $("wt-straight").textContent = sgn(session.total.shift.straightMean, 1);
+    const fill = $("wt-fill"), range = 25;               // gauge full scale ± 25 pp
+    const w = v == null ? 0 : Math.min(1, Math.abs(v) / range) * 50;
+    fill.className = v != null && v < 0 ? "neg" : "";
+    fill.style.width = `${w}%`;
+    fill.style.left = v != null && v < 0 ? `${50 - w}%` : "50%";
+    const per = TYPES.map((k) => {
+      const xs = S.punches.filter((p) => p.shiftPp != null && effType(p) === k).map((p) => p.shiftPp);
+      return xs.length ? `${k} ${sgn(C.mean(xs), 0)}` : null;
+    }).filter(Boolean);
+    $("wt-types").textContent = per.length
+      ? `Avg shift by type (pp of load onto the front foot): ${per.join(" · ")}`
+      : "Connect insoles (or Simulate with sim insoles) for front/back foot load shift per punch.";
+  }
+
+  function renderTable() {
+    if (document.activeElement && document.activeElement.closest?.("#punch-table")) { S.tableDirty = true; return; }
+    S.tableDirty = false;
+    const rows = S.punches.slice(-CFG.tableRows).reverse().map((p) => {
+      const cs = S.combos[p.combo - 1];
+      const sel = p.trueType == null ? "" : p.trueType === p.type ? "=" : p.trueType;
+      const opt = (v, label) => `<option value="${v}"${sel === v ? " selected" : ""}>${label}</option>`;
+      return `<tr><td>${p.n}</td><td>${p.round || "—"}</td><td><span class="badge sm hand-${p.hand}">${p.hand}</span></td>
+        <td>${cs ? cs.str : "—"} <span class="pair">·${p.comboPos}</span></td>
+        <td><span class="badge sm pt-${p.type}">${p.type}</span></td><td>${fs(p.peakV)}</td><td>${p.peakG.toFixed(1)}</td>
+        <td>${Math.round(p.rotDeg)}</td><td>${Math.round(p.vertFrac * 100)}</td>
+        <td class="${p.shiftPp == null ? "dim" : p.shiftPp < 0 ? "neg" : "pos"}">${sgn(p.shiftPp, 1)}</td><td>${p.gapMs ?? "—"}</td>
+        <td><select data-punch="${p.n}">${opt("", "unreviewed")}${opt("=", "✓ correct")}${["jab", "cross", "hook", "uppercut"].map((k) => opt(k, k)).join("")}</select></td></tr>`;
+    });
+    $("punch-table").tBodies[0].innerHTML = rows.join("");
+  }
+
+  function renderRounds() {
+    const wrap = $("round-wrap");
+    const t = session.total;
+    if (!session.rounds.length && !t.count) {
+      wrap.innerHTML = `<div class="empty">Start rounds (or just throw some punches) — per-round punch count, rate, speed by type, L/R balance and weight transfer land here.</div>`;
+      return;
+    }
+    const cell = (b) => (b.n ? `${fs(b.mean)} <span class="pair">/ ${fs(b.peak)} · ${b.n}</span>` : `<span class="dim">—</span>`);
+    const row = (r, label, cls) => `<tr class="${cls}"><td>${label}${r.open ? " ●" : ""}</td><td>${r.count}</td><td>${r.perMin == null ? "—" : r.perMin.toFixed(0)}</td>
+      <td>${r.combos}</td><td>${r.longest || "—"}</td><td>${r.count ? `${fs(r.meanV)} <span class="pair">/ ${fs(r.peakV)}</span>` : "—"}</td>
+      <td>${r.count ? `${r.pctL.toFixed(0)} / ${(100 - r.pctL).toFixed(0)}` : "—"}</td>
+      ${TYPES.map((k) => `<td>${cell(r.byType[k])}</td>`).join("")}
+      <td class="${r.shift.mean == null ? "dim" : r.shift.mean < 0 ? "neg" : "pos"}">${sgn(r.shift.mean, 1)}</td></tr>`;
+    wrap.innerHTML = `<table id="round-table"><thead><tr><th>rnd</th><th>punches</th><th>/min</th><th>combos</th><th>longest</th>
+      <th>speed <span class="u-speed">${C.speedLabel(S.unit)}</span></th><th>L / R %</th><th>jab</th><th>cross</th><th>hook</th><th>upper</th><th>shift pp</th></tr></thead>
+      <tbody>${session.rounds.map((r) => row(r, `R${r.n}`, "round-row")).join("")}${row(t, session.rounds.length ? "All" : "Free", "total-row")}</tbody></table>`;
+  }
+
+  function renderFatigue() {
+    const f = session.fatigue, wrap = $("fx-wrap");
+    if (!f) {
+      wrap.innerHTML = `<div class="empty fx-empty">Run two or more rounds (3+ punches each) to draw the fatigue curve.</div>`;
+      $("fx-tag").textContent = "% of first round";
+      return;
+    }
+    const W = 560, H = 220, pad = { l: 42, r: 22, t: 22, b: 30 };
+    const all = f.points.flatMap((p) => [p.speedPct, p.ratePct]).concat(100);
+    let lo = Math.floor((Math.min(...all) - 6) / 10) * 10, hi = Math.ceil((Math.max(...all) + 6) / 10) * 10;
+    if (hi - lo < 30) { hi += 10; lo -= 10; }
+    const n = f.points.length;
+    const x = (i) => pad.l + (n === 1 ? 0.5 : i / (n - 1)) * (W - pad.l - pad.r);
+    const y = (v) => pad.t + (1 - (v - lo) / (hi - lo)) * (H - pad.t - pad.b);
+    let grid = "";
+    for (let v = lo; v <= hi; v += 10) grid += `<line class="axis" x1="${pad.l}" x2="${W - pad.r}" y1="${y(v)}" y2="${y(v)}"/><text class="lbl" x="${pad.l - 6}" y="${y(v) + 4}" text-anchor="end">${v}%</text>`;
+    const line = (key, cls) => `<polyline class="${cls}" points="${f.points.map((p, i) => `${x(i)},${y(p[key])}`).join(" ")}"/>`;
+    const dots = (key, dcls, tcls, dy) => f.points.map((p, i) =>
+      `<circle class="${dcls}" cx="${x(i)}" cy="${y(p[key])}" r="4"/><text class="val ${tcls}" x="${x(i)}" y="${y(p[key]) + dy}" text-anchor="middle">${p[key].toFixed(0)}</text>`).join("");
+    const xl = f.points.map((p, i) => `<text class="lbl" x="${x(i)}" y="${H - 8}" text-anchor="middle">R${p.n}</text>`).join("");
+    wrap.innerHTML = `<svg class="fx" viewBox="0 0 ${W} ${H}" role="img" aria-label="Fatigue curve: hand speed and punches per minute by round, percent of first round" preserveAspectRatio="xMidYMid meet">
+      ${grid}<line class="base" x1="${pad.l}" x2="${W - pad.r}" y1="${y(100)}" y2="${y(100)}"/>
+      ${line("ratePct", "l-rate")}${line("speedPct", "l-speed")}${dots("ratePct", "d-rate", "t-rate", 16)}${dots("speedPct", "d-speed", "t-speed", -9)}${xl}</svg>`;
+    $("fx-tag").textContent = `speed ${sgn(f.speedFadePct)}% · output ${sgn(f.rateFadePct)}%`;
+  }
+
+  function renderConfusion() {
+    const cf = C.confusion(S.punches);
+    $("cm-tag").textContent = cf.n ? `${cf.n} reviewed · ${(cf.accuracy * 100).toFixed(0)}% match` : "0 reviewed";
+    const maxCell = Math.max(1, ...TYPES.flatMap((a) => TYPES.map((b) => cf.m[a][b])));
+    const head = `<tr><th class="rowh">true ↓ auto →</th>${TYPES.map((k) => `<th>${k}</th>`).join("")}<th>recall</th></tr>`;
+    const body = TYPES.map((a) => `<tr><th class="rowh">${a}</th>${TYPES.map((b) => {
+      const v = cf.m[a][b];
+      return `<td class="cell${a === b ? "" : " off"}" style="--heat:${Math.round((v / maxCell) * 70)}">${v || "·"}</td>`;
+    }).join("")}<td class="dim">${cf.recall[a] == null ? "—" : (cf.recall[a] * 100).toFixed(0) + "%"}</td></tr>`).join("");
+    const foot = `<tr><th class="rowh">precision</th>${TYPES.map((k) => `<td class="dim">${cf.precision[k] == null ? "—" : (cf.precision[k] * 100).toFixed(0) + "%"}</td>`).join("")}<td></td></tr>`;
+    $("cm-wrap").innerHTML = `<div class="scroll"><table class="cm" id="cm-table"><thead>${head}</thead><tbody>${body}${foot}</tbody></table></div>`;
+  }
+
+  function renderSummary() {
+    const t = session.total, f = session.fatigue, cf = C.confusion(S.punches);
+    const ph = S.clock ? S.clock.phaseAt(now()) : null;
+    $("summary-tag").textContent = !t.count ? "waiting for punches"
+      : S.sessionDone ? `complete · ${session.rounds.length} round${session.rounds.length === 1 ? "" : "s"}`
+      : S.clock?.running ? `in progress · ${ph.phase === "rest" ? "rest" : "round " + ph.n}`
+      : session.rounds.length ? "stopped early" : "free work";
+    const k = (v, label, sub) => `<div class="kpi"><div class="v">${v}</div><div class="k">${label}</div><div class="s">${sub ?? "&nbsp;"}</div></div>`;
+    const u = C.speedLabel(S.unit);
+    $("kpis").innerHTML = [
+      k(t.count, "punches", session.rounds.length ? `${session.inRounds} in rounds` : "free work"),
+      k(t.perMin == null ? "—" : t.perMin.toFixed(0), "punches / min", t.durMs ? `${C.fmtClock(t.durMs)} active` : "needs 20 s of work"),
+      k(`${fs(t.meanV)} <span class="unit">${u}</span>`, "mean hand speed", t.peakV ? `peak ${fs(t.peakV)} ${u} · ${t.peakType}` : null),
+      k(t.combos, "combinations", t.longest ? `longest ${t.longestStr}` : null),
+      k(t.count ? `${t.pctL.toFixed(0)} / ${(100 - t.pctL).toFixed(0)}` : "—", "left / right %", t.meanL != null && t.meanR != null ? `speed L ${fs(t.meanL)} · R ${fs(t.meanR)}` : null),
+      k(f ? `${sgn(f.speedFadePct)}%` : "—", "late-round speed", f ? `output ${sgn(f.rateFadePct)}% · R${f.baseRound}→R${f.lastRound}` : "needs 2+ rounds"),
+      k(t.shift.straightMean == null ? "—" : `${sgn(t.shift.straightMean, 1)} <span class="unit">pp</span>`, "weight to front foot", t.shift.n ? `straights · ${t.shift.n} measured` : "no insole data"),
+      k(cf.n ? pct(cf.accuracy * 100) : "—", "auto-label match", `${cf.n} reviewed of ${t.count}`),
+    ].join("");
+    const notes = C.coachNotes(session, cf, S.unit);
+    $("notes").innerHTML = notes.length
+      ? notes.map((n) => `<div class="n ${n.tone}">${n.text}</div>`).join("")
+      : `<div class="empty">Coaching notes appear once there are enough punches and rounds to compare.</div>`;
+  }
+
+  // ---------- round clock ----------
+  const fmtDur = (ms) => (ms >= 60000 && ms % 60000 === 0 ? `${ms / 60000} min` : ms >= 60000 ? `${(ms / 60000).toFixed(2).replace(/\.?0+$/, "")} min` : `${Math.round(ms / 1000)} s`);
+  function readSettings() {
+    const num = (id, lo, hi, dflt) => { const v = Number($(id).value); return Number.isFinite(v) && v > 0 ? Math.min(hi, Math.max(lo, v)) : dflt; };
+    S.settings.roundMin = num("set-round", 0.1, 10, 3);
+    S.settings.restMin = num("set-rest", 0.05, 5, 1);
+    S.settings.rounds = Math.round(num("set-rounds", 1, 12, 3));
+  }
+  function applySettingsToInputs() {
+    $("set-round").value = S.settings.roundMin; $("set-rest").value = S.settings.restMin; $("set-rounds").value = S.settings.rounds;
+    $("set-bell").checked = S.bell;
+  }
+  function renderClock() {
+    const st = S.settings, roundMs = st.roundMin * 60000, restMs = st.restMin * 60000;
+    $("clock-sub").textContent = `${fmtDur(roundMs)} round · ${fmtDur(restMs)} rest × ${st.rounds}`;
+    const ph = S.clock ? S.clock.phaseAt(now()) : { phase: "idle", n: 0, elapsedMs: 0, remainingMs: roundMs, phaseMs: roundMs };
+    const total = S.clock ? S.clock.cfg.rounds : st.rounds;
+    const warn = ph.phase === "round" && ph.remainingMs <= CFG.warnMs && roundMs > CFG.warnMs * 2;
+    $("clock").className = `clock ${ph.phase}${warn ? " warn" : ""}`;
+    $("clock-phase").textContent = { idle: "Ready", round: `Round ${ph.n} of ${total}`, rest: `Rest · next round ${ph.n + 1}`, done: "Session complete", stopped: "Stopped" }[ph.phase];
+    $("clock-time").textContent = ph.phase === "done" || ph.phase === "stopped" ? "0:00" : C.fmtClock(ph.remainingMs);
+    $("clock-bar").style.width = `${ph.phaseMs ? Math.min(100, (ph.elapsedMs / ph.phaseMs) * 100) : 0}%`;
+    const running = !!S.clock?.running, locked = running || S.rounds.length > 0;
+    const b = $("btn-rounds");
+    b.textContent = running ? "Stop" : S.sessionDone ? "Rounds complete" : S.rounds.length ? "Stopped" : "Start Rounds";
+    b.disabled = !running && S.rounds.length > 0;
+    b.title = b.disabled ? "Reset the session to run another set of rounds" : "";
+    b.classList.toggle("primary", !running);
+    for (const id of ["set-round", "set-rest", "set-rounds"]) $(id).disabled = locked;
+  }
+
+  function startRounds() {
+    if (S.clock?.running) { handleClock(S.clock.stop(now())); return; }
+    if (S.rounds.length) { log("Reset the session before starting another set of rounds (export the CSV first to keep this one).", "warn"); return; }
+    readSettings(); savePrefs();
+    S.clock = C.createRoundClock({ roundMs: S.settings.roundMin * 60000, restMs: S.settings.restMin * 60000, rounds: S.settings.rounds, warnMs: CFG.warnMs });
+    S.sessionDone = false;
+    ensureAudio();
+    handleClock(S.clock.start(now()));
+  }
+  function handleClock(events) {
+    for (const ev of events) {
+      const N = S.clock.cfg.rounds;
+      if (ev.type === "roundStart") {
+        S.rounds.push({ n: ev.n, startT: ev.t, endT: null });
+        bell(1);
+        log(`Round ${ev.n} of ${N} — go.`, "ok");
+      } else if (ev.type === "warn") {
+        clap();
+        log(`Round ${ev.n}: 10 seconds.`, "warn");
+      } else if (ev.type === "roundEnd" || (ev.type === "stopped" && ev.phase === "round")) {
+        const r = S.rounds.find((x) => x.n === ev.n);
+        if (r && r.endT == null) r.endT = ev.t;
+        if (ev.type === "roundEnd") bell(ev.n === N ? 3 : 2);
+        S.combos = C.annotateCombos(S.punches, CFG.comboGapMs);
+        const rs = C.buildSession(S.punches, S.rounds, ev.t).rounds.find((x) => x.n === ev.n);
+        if (rs) log(`Round ${ev.n} ${ev.type === "stopped" ? "stopped" : "done"}: ${rs.count} punches, ${rs.perMin == null ? "—" : rs.perMin.toFixed(0)}/min, mean ${fs(rs.meanV)} ${C.speedLabel(S.unit)}, ${rs.combos} combos.`, "ok");
+      } else if (ev.type === "restStart") {
+        log(`Rest — ${fmtDur(S.settings.restMin * 60000)}.`);
+      } else if (ev.type === "done") {
+        S.sessionDone = true;
+        log(`All ${N} rounds complete — summary below.`, "ok");
+        if (S.sim) simStop();
+      }
+      if (ev.type === "stopped") {
+        log("Rounds stopped.", "warn");
+        if (S.sim) simStop();
+      }
+    }
+    renderClock();
+    renderAll();
+  }
+  function clockTick() {
+    S.tick++;
+    if (S.clock) {
+      const evs = S.clock.tick(now());
+      if (evs.length) handleClock(evs);
+    }
+    renderClock();
+    renderRate();
+    if (S.tick % 10 === 0 && (S.clock?.running || S.punches.length)) { renderStats(); renderWeight(); }
+  }
+
+  // ---------- audio ----------
+  function ensureAudio() {
+    try {
+      S.audio ??= new (window.AudioContext || window.webkitAudioContext)();
+      if (S.audio.state === "suspended") S.audio.resume();
+    } catch { /* no audio */ }
+    return S.audio;
+  }
+  function tone(freq, startIn, dur, vol, type = "sine") {
+    const a = ensureAudio();
+    if (!a) return;
+    const t0 = a.currentTime + startIn;
+    const o = a.createOscillator(), g = a.createGain();
+    o.type = type; o.frequency.value = freq;
+    g.gain.setValueAtTime(0.0001, t0);
+    g.gain.exponentialRampToValueAtTime(vol, t0 + 0.005);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+    o.connect(g); g.connect(a.destination);
+    o.start(t0); o.stop(t0 + dur + 0.05);
+  }
+  function bell(count) {
+    if (!S.bell) return;
+    try {
+      for (let i = 0; i < count; i++)
+        for (const [ratio, gain] of [[1, 1], [2.76, 0.55], [5.4, 0.32], [8.93, 0.18]]) tone(520 * ratio, i * 0.4, 1.5 / Math.sqrt(ratio), 0.22 * gain);
+    } catch { /* no audio */ }
+  }
+  function clap() {
+    if (!S.bell) return;
+    try { tone(1800, 0, 0.05, 0.2, "square"); tone(1800, 0.12, 0.05, 0.2, "square"); } catch { /* no audio */ }
+  }
+  function beep(freq, ms) { try { tone(freq, 0, ms / 1000, 0.25); } catch { /* no audio */ } }
 
   // ---------- reaction drill ----------
   function armGo() {
@@ -175,34 +433,37 @@
       S.go.at = now();
       $("go-light").className = "go-light go";
       beep(880, 120);
-      if (S.sim) setTimeout(() => simPunch(Math.random() > 0.5 ? "L" : "R", "straight"), 200 + Math.random() * 120);
+      if (S.sim) setTimeout(() => simThrowFree("straight"), 200 + Math.random() * 120);
     }, CFG.goDelayMinMs + Math.random() * (CFG.goDelayMaxMs - CFG.goDelayMinMs));
     log("GO armed — punch on the beep.");
   }
-  function beep(freq, ms) {
-    try {
-      S.audio ??= new (window.AudioContext || window.webkitAudioContext)();
-      const o = S.audio.createOscillator(), g = S.audio.createGain();
-      o.frequency.value = freq; o.connect(g); g.connect(S.audio.destination);
-      g.gain.value = 0.25; o.start(); o.stop(S.audio.currentTime + ms / 1000);
-    } catch { /* no audio */ }
-  }
 
   // ---------- CSV ----------
-  function exportCsv() {
-    const lines = ["punch,hand,auto_type,true_type,peak_speed_ms,peak_accel_g,dur_ms,rot_deg,vert_frac,curve,gap_ms"];
-    for (const p of S.punches) lines.push(
-      `${p.n},${p.hand},${p.type},${p.trueType ?? p.type},${p.peakV.toFixed(2)},${p.peakG.toFixed(2)},${p.durMs},${p.rotDeg.toFixed(1)},${p.vertFrac.toFixed(3)},${p.curve.toFixed(2)},${p.gapMs ?? ""}`);
+  function download(name, text) {
     const a = document.createElement("a");
-    a.href = URL.createObjectURL(new Blob([lines.join("\n")], { type: "text/csv" }));
-    a.download = `punches-${new Date().toISOString().slice(0, 19)}.csv`;
+    a.href = URL.createObjectURL(new Blob([text], { type: "text/csv" }));
+    a.download = name;
     a.click();
-    log(`Exported ${S.punches.length} punches (auto + corrected labels).`);
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  }
+  const stamp = () => new Date().toISOString().slice(0, 19).replace(/:/g, "-");
+  function exportCsv() {
+    if (!S.punches.length) { log("No punches to export yet.", "warn"); return; }
+    S.combos = C.annotateCombos(S.punches, CFG.comboGapMs);
+    const lines = [C.PUNCH_CSV_HEADER, ...S.punches.map((p) => C.punchCsvRow(p, S.combos[p.combo - 1]?.str ?? ""))];
+    download(`punches-${stamp()}.csv`, lines.join("\n"));
+    log(`Exported ${S.punches.length} punches (m/s, auto + corrected labels, combos, rounds, weight shift).`);
+  }
+  function exportRoundsCsv() {
+    const sess = C.buildSession(S.punches, S.rounds, now());
+    if (!sess.rounds.length) { log("No rounds yet — run the round timer first.", "warn"); return; }
+    download(`rounds-${stamp()}.csv`, [C.ROUND_CSV_HEADER, ...sess.rounds.map(C.roundCsvRow)].join("\n"));
+    log(`Exported ${sess.rounds.length} rounds (m/s).`);
   }
 
   // ---------- SDK adapter ----------
   const SDKAdapter = {
-    devices: { L: null, R: null },
+    devices: { L: null, R: null }, pair: null,
     hasSDK() { return typeof window.BS !== "undefined"; },
     async connect(hand) {
       if (!this.hasSDK()) { log("SDK not loaded — check network / unpkg.", "bad"); return; }
@@ -210,7 +471,6 @@
         const device = new BS.Device();
         this.devices[hand] = device;
         device.addEventListener("isConnected", () => {
-          S.hands[hand].connected = device.isConnected;
           $(hand === "L" ? "btn-left" : "btn-right").classList.toggle("connected", device.isConnected);
           if (device.isConnected) {
             device.setSensorConfiguration({ linearAcceleration: CFG.rateMs, gameRotation: CFG.rateMs * 2 });
@@ -219,66 +479,224 @@
         });
         device.addEventListener("linearAcceleration", (e) => {
           const a = e.message.linearAcceleration;
-          if (a) onAcc(hand, a, now());
+          if (a) detector.acc(hand, a, now());
         });
         device.addEventListener("gameRotation", (e) => {
           const q = e.message.gameRotation ?? e.message.quaternion;
-          if (q) onQuat(hand, q);
+          if (q) detector.quat(hand, q);
         });
         device.connect();
         log(`${hand} wrist: Bluetooth chooser opened.`);
       } catch (err) { log(`${hand} wrist connect failed: ${err.message}`, "bad"); }
     },
+    async connectInsoles() {
+      if (!this.hasSDK()) { log("SDK not loaded — check network / unpkg.", "bad"); return; }
+      try {
+        this.pair = BS.DevicePair.insoles;
+        this.pair.addEventListener("isConnected", () => $("btn-insoles").classList.toggle("connected", this.pair.isConnected));
+        this.pair.addEventListener("deviceIsConnected", (e) => {
+          const { device, side, isConnected } = e.message;
+          if (!isConnected) return;
+          device.setSensorConfiguration({ pressure: 10 });
+          log(`${side} insole connected @ 10ms.`);
+        });
+        // TODO[SDK]: confirm devicePressure carries { pressure: { normalizedSum }, side } on hardware
+        this.pair.addEventListener("devicePressure", (e) => {
+          const { pressure: p, side } = e.message;
+          if (p?.normalizedSum != null) onLoad(side, p.normalizedSum, now());
+        });
+        const device = new BS.Device();
+        device.connect();
+        log("Insoles: Bluetooth chooser opened. Pick one, then click again for the other foot. (Optional — adds weight transfer.)");
+      } catch (err) { log(`Insole connect failed: ${err.message}`, "bad"); }
+    },
   };
 
   // ---------- simulate ----------
-  // Synthesizes 200 Hz accel/quat windows per punch type so detection,
-  // integration, and classification all run the real code path.
-  function simPunch(hand, kind) {
-    const h = S.hands[hand];
-    const t0 = now();
-    const dur = 140 + Math.random() * 60;
-    const peak = (kind === "hook" ? 55 : kind === "uppercut" ? 48 : 65) * (0.85 + Math.random() * 0.3);
-    let yaw0 = Math.random() * Math.PI;
-    for (let ms = 0; ms <= dur + 40; ms += CFG.rateMs) {
-      setTimeout(() => {
-        const ph = Math.min(1, ms / dur);
-        const env = Math.sin(ph * Math.PI) * peak;
-        let ax = 0, ay = 0, az = 0;
-        if (kind === "straight") { ax = env; ay = env * 0.08 * Math.sin(ph * 7); }
-        else if (kind === "hook") { ax = env * Math.cos(ph * 1.8); ay = env * Math.sin(ph * 1.8); }
-        else { az = env * 0.9; ax = env * 0.35; }
-        const yaw = kind === "hook" ? yaw0 + ph * 1.2 : yaw0 + ph * 0.1;
-        onQuat(hand, { x: 0, y: 0, z: Math.sin(yaw / 2), w: Math.cos(yaw / 2) });
-        onAcc(hand, { x: ax, y: ay, z: az }, now());
-      }, ms);
+  // Synthesizes 200 Hz accel/quat per punch (BPCore.synthPunch) and plays it
+  // through the real detector at wall-clock time — plus, optionally, a 100 Hz
+  // insole load channel — so detection, integration, classification, combos,
+  // rounds and weight transfer all run the production code path.
+  const Sim = {
+    rng: C.mulberry32((Date.now() ^ 0x5bd1e995) >>> 0),
+    streams: [], expect: { L: [], R: [] }, timers: new Set(), pump: null, insoleTimer: null, insole: null,
+  };
+  const later = (fn, ms) => {
+    const id = setTimeout(() => { Sim.timers.delete(id); fn(); }, ms);
+    Sim.timers.add(id);
+  };
+  function simPump() {
+    const t = now();
+    for (const st of Sim.streams) {
+      while (st.i < st.samples.length && st.t0 + st.samples[st.i].ms <= t) {
+        const smp = st.samples[st.i++];
+        detector.quat(st.hand, smp.q);
+        detector.acc(st.hand, smp.a, st.t0 + smp.ms);
+      }
     }
+    Sim.streams = Sim.streams.filter((st) => st.i < st.samples.length);
+  }
+  function simInsoleTick() {
+    const t = now(), s = Sim.insole.sample(t);
+    const ls = leadSide(), rs = ls === "left" ? "right" : "left";
+    onLoad(ls, s.lead, t); onLoad(rs, s.rear, t);
+  }
+  function simThrow(hand, kind, scale) {
+    const s = C.synthPunch(kind, Sim.rng, { scale, ambiguous: Sim.rng() < CFG.simAmbiguous });
+    const t0 = now(), isLead = hand === lead();
+    Sim.streams.push({ hand, t0, samples: s.samples, i: 0 });
+    Sim.expect[hand].push({ t: t0, truth: kind === "straight" ? (isLead ? "jab" : "cross") : kind });
+    if (S.simInsoles && Sim.insole) Sim.insole.punch(t0, s.durMs, C.shiftAmpPp(kind, isLead, Sim.rng, scale));
+  }
+  function simThrowFree(kind) {            // one-off punch (reaction drill) on a hand that is not mid-punch
+    const busy = new Set(Sim.streams.map((s) => s.hand));
+    const hands = ["L", "R"].filter((h) => !busy.has(h));
+    if (!hands.length) { later(() => simThrowFree(kind), 80); return; }
+    simThrow(hands[Math.floor(Sim.rng() * hands.length)], kind, 1);
+  }
+  function simFatigue(ph) {
+    if (!ph || ph.phase !== "round") return { scale: 1, slow: 1 };
+    const frac = ph.phaseMs ? ph.elapsedMs / ph.phaseMs : 0;
+    return { scale: 1 - 0.045 * (ph.n - 1) - 0.03 * frac, slow: 1 + 0.12 * (ph.n - 1) };
+  }
+  function simNextCombo() {
+    if (!S.sim) return;
+    const ph = S.clock ? S.clock.phaseAt(now()) : null;
+    if (ph && ph.phase !== "round") { later(simNextCombo, 250); return; }       // rest between rounds
+    const { scale, slow } = simFatigue(ph);
+    let off = 0, prevHand = null;
+    for (const [hand, kind] of C.comboToThrows(C.pickCombo(Sim.rng), lead())) {
+      later(() => simThrow(hand, kind, scale), off);
+      off += (prevHand === hand ? 520 + Sim.rng() * 60 : 330 + Sim.rng() * 110) * slow;
+      prevHand = hand;
+    }
+    later(simNextCombo, off + (900 + Sim.rng() * 1300) * slow);
   }
   function simStart() {
-    if (S.sim) { S.sim = false; clearInterval(S.simTimer); $("btn-sim").classList.remove("connected"); log("Simulate stopped."); return; }
+    if (S.sim) return;
     S.sim = true;
     $("btn-sim").classList.add("connected");
-    log("Simulate: combos every ~1 s — straights, hooks, uppercuts, both hands.", "ok");
-    const kinds = ["straight", "straight", "straight", "hook", "hook", "uppercut"];
-    S.simTimer = setInterval(() => {
-      if (Math.random() < 0.25) return; // breathing room
-      const lead = S.stance === "orthodox" ? "L" : "R";
-      const hand = Math.random() < 0.55 ? lead : (lead === "L" ? "R" : "L");
-      simPunch(hand, kinds[Math.floor(Math.random() * kinds.length)]);
-    }, 1000);
+    $("btn-sim").textContent = "Stop Simulate";
+    Sim.insole = C.createInsoleSim(Sim.rng);
+    Sim.pump = setInterval(simPump, CFG.simPumpMs);
+    if (S.simInsoles) Sim.insoleTimer = setInterval(simInsoleTick, 10);
+    log("Simulate: boxing combinations (1-2, 1-2-3, 1-2-5-2 …) — both hands, mixed types, fading across rounds.", "ok");
+    later(simNextCombo, 300);
+  }
+  function simStop() {
+    if (!S.sim) return;
+    S.sim = false;
+    clearInterval(Sim.pump); clearInterval(Sim.insoleTimer);
+    for (const id of Sim.timers) clearTimeout(id);
+    Sim.timers.clear(); Sim.streams.length = 0; Sim.expect = { L: [], R: [] };
+    $("btn-sim").classList.remove("connected");
+    $("btn-sim").textContent = "Simulate";
+    log("Simulate stopped.");
+  }
+
+  // ---------- session reset ----------
+  function resetSession() {
+    if (S.sim) simStop();
+    clearTimeout(S.go.timer);
+    S.punches = []; S.combos = []; S.rounds = []; S.clock = null; S.sessionDone = false;
+    S.go = { armed: false, at: null, timer: null, best: null };
+    S.insole.buf = [];
+    detector.reset();
+    $("react-ms").textContent = "—"; $("react-best").textContent = "—";
+    $("go-light").className = "go-light"; $("btn-go").classList.remove("armed");
+    renderClock(); renderAll();
+    log("Session cleared.", "warn");
+  }
+
+  // ---------- summary copy ----------
+  async function copySummary() {
+    const cf = C.confusion(S.punches);
+    const text = C.summaryText(C.buildSession(S.punches, S.rounds, now()), cf, S.unit);
+    let ok = false;
+    try { await navigator.clipboard.writeText(text); ok = true; } catch {
+      try {
+        const ta = document.createElement("textarea");
+        ta.value = text; document.body.appendChild(ta); ta.select();
+        ok = document.execCommand("copy"); ta.remove();
+      } catch { /* blocked */ }
+    }
+    $("copy-state").textContent = ok ? "Copied." : "Clipboard blocked — summary written to the session log.";
+    if (!ok) log(text.replace(/\n/g, "<br>"));
+    setTimeout(() => { $("copy-state").textContent = ""; }, 3000);
   }
 
   // ---------- wire up ----------
   $("btn-left").addEventListener("click", () => SDKAdapter.connect("L"));
   $("btn-right").addEventListener("click", () => SDKAdapter.connect("R"));
+  $("btn-insoles").addEventListener("click", () => SDKAdapter.connectInsoles());
   $("btn-stance").addEventListener("click", (e) => {
     S.stance = S.stance === "orthodox" ? "southpaw" : "orthodox";
     e.target.textContent = `Stance: ${S.stance[0].toUpperCase()}${S.stance.slice(1)}`;
     log(`Stance → ${S.stance} (${S.stance === "orthodox" ? "left" : "right"} lead).`);
   });
   $("btn-go").addEventListener("click", armGo);
-  $("btn-sim").addEventListener("click", simStart);
+  $("btn-sim").addEventListener("click", () => (S.sim ? simStop() : simStart()));
+  $("sim-insoles").addEventListener("change", (e) => {
+    S.simInsoles = e.target.checked;
+    if (S.sim) {
+      clearInterval(Sim.insoleTimer); Sim.insoleTimer = null;
+      if (S.simInsoles) Sim.insoleTimer = setInterval(simInsoleTick, 10);
+    }
+  });
+  $("sim-truth").addEventListener("change", (e) => { S.simTruth = e.target.checked; });
   $("btn-export").addEventListener("click", exportCsv);
-  document.addEventListener("keydown", (e) => { if (e.code === "Space") { e.preventDefault(); armGo(); } });
-  log("Ready. Connect both wrist Sense units, or hit Simulate.");
+  $("btn-export-rounds").addEventListener("click", exportRoundsCsv);
+  $("btn-rounds").addEventListener("click", startRounds);
+  $("btn-copy").addEventListener("click", copySummary);
+  $("btn-reset").addEventListener("click", (e) => {
+    const b = e.currentTarget;
+    if (!b.classList.contains("confirm")) {
+      b.classList.add("confirm"); b.textContent = "Click again to clear";
+      S.resetTimer = setTimeout(() => { b.classList.remove("confirm"); b.textContent = "Reset session"; }, 3000);
+      return;
+    }
+    clearTimeout(S.resetTimer);
+    b.classList.remove("confirm"); b.textContent = "Reset session";
+    resetSession();
+  });
+  document.querySelectorAll("#units-seg button").forEach((b) => b.addEventListener("click", () => {
+    S.unit = b.dataset.unit; savePrefs(); renderUnits(); renderAll(); renderClock();
+  }));
+  for (const id of ["set-round", "set-rest", "set-rounds"]) $(id).addEventListener("change", () => { readSettings(); applySettingsToInputs(); savePrefs(); renderClock(); });
+  $("set-bell").addEventListener("change", (e) => { S.bell = e.target.checked; savePrefs(); });
+  $("btn-confirm-all").addEventListener("click", () => {
+    let n = 0;
+    for (const p of S.punches) if (p.trueType == null) { p.trueType = p.type; n++; }
+    log(`Marked ${n} unreviewed punch${n === 1 ? "" : "es"} as correct.`);
+    renderAll();
+  });
+  $("punch-table").tBodies[0].addEventListener("change", (e) => {
+    const sel = e.target.closest("select");
+    if (!sel) return;
+    const punch = S.punches.find((x) => x.n === Number(sel.dataset.punch));
+    if (!punch) return;
+    const v = sel.value;
+    punch.trueType = v === "" ? null : v === "=" ? punch.type : v;
+    if (v === "") log(`Punch ${punch.n}: review cleared.`);
+    else if (punch.trueType === punch.type) log(`Punch ${punch.n}: ${punch.type} confirmed.`);
+    else log(`Punch ${punch.n}: corrected ${punch.type} → ${punch.trueType}.`);
+    sel.blur();
+    renderAll();
+  });
+  $("punch-table").addEventListener("focusout", () => { if (S.tableDirty) setTimeout(renderAll, 0); });
+  document.addEventListener("keydown", (e) => {
+    if (e.code !== "Space" || /^(INPUT|SELECT|TEXTAREA|BUTTON)$/.test(e.target.tagName)) return;
+    e.preventDefault(); armGo();
+  });
+
+  loadPrefs();
+  applySettingsToInputs();
+  readSettings();               // clamp anything odd that came from storage or the URL
+  applySettingsToInputs();
+  renderUnits();
+  renderClock();
+  renderAll();
+  setInterval(clockTick, 100);
+  window.__bwBoxing = { S, core: C };   // debug / test hook (read-only use)
+  log("Ready. Connect both wrist Sense units (insoles optional), or hit Simulate.");
 })();

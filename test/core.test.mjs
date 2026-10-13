@@ -168,6 +168,20 @@ test("per-round stats: counts, rate, by-type speed, L/R balance, combos", () => 
   assert.equal(sess.total.count, 4);
   assert.equal(sess.total.durMs, 120000);
   assert.equal(sess.inRounds, 4);
+  // output rate counts only punches thrown while the clock was live
+  P.push(mkPunch({ n: 5, startT: 62000, t: 62150, round: 0, peakV: 4 }));
+  const s2 = C.buildSession(P, [{ n: 1, startT: 0, endT: 60000 }, { n: 2, startT: 60000, endT: null }], 120000);
+  assert.equal(s2.total.count, 5);
+  assert.equal(s2.inRounds, 4);
+  assert.equal(s2.total.perMin, 4 / 2);
+});
+
+test("detector ignores out-of-order samples", () => {
+  const det = C.createDetector({});
+  det.acc("L", { x: 0, y: 0, z: 0 }, 100);
+  det.acc("L", { x: 0, y: 0, z: 0 }, 105);
+  assert.equal(det.acc("L", { x: 50, y: 0, z: 0 }, 103), null);
+  assert.equal(det.hands.L.active, false);
 });
 
 test("free work (no rounds): rate withheld until 20 s of work", () => {
