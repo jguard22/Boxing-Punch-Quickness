@@ -152,7 +152,7 @@ button.sm { padding: var(--sp-1) var(--sp-3); font-size: var(--fs-sm); min-heigh
 
 /* ---------------------------------------------------------------- the recap sheet */
 .recap-dialog {
-  width: min(var(--w-recap), calc(100% - var(--sp-6))); max-height: calc(100% - var(--sp-6)); overflow: auto; padding: var(--sp-4); border: var(--bw) solid var(--line);
+  margin: auto; width: min(var(--w-recap), calc(100% - var(--sp-6))); max-height: calc(100% - var(--sp-6)); overflow: auto; padding: var(--sp-4); border: var(--bw) solid var(--line);
   border-radius: var(--r-lg); background: var(--panel); color: var(--text); box-shadow: var(--fk-shadow);
 }
 .recap-dialog::backdrop { background: var(--fk-overlay); }

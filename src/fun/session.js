@@ -442,7 +442,7 @@ export function createSession({ view, win = globalThis.window, now = () => perfo
     const unlock = nextUnlock(info.level);
     return {
       cards: buildRecapCards({
-        rounds: all.map((r) => ({ n: r.n, grade: r.grade, score: r.score, punches: r.punches, perMin: r.perMin, xp: r.xp })),
+        rounds: all.map((r) => ({ n: r.n, grade: r.grade, score: r.score, punches: r.punches, perMin: r.perMin, xp: r.xp, warmup: r.warmup })),
         best: bestMoment({ calls: callsAll, chains: chainsAll, allWarmup: all.every((r) => r.grade === "warmup") }),
         comboCount: strings.size, level: info.level, title: info.title, nextUnlock: unlock ? { level: unlock.level, label: unlock.label } : null,
         week: week ? { count: week.count, target: week.target, reached: week.reached } : null,

@@ -244,6 +244,12 @@ test("the recap has three cards: Rounds, Combo highlight, Up next; the best mome
   for (const c of cards) assert.ok(!c.list || c.list.length !== 1, "a one-line list is folded into the sentence (the carousel prints lists of two or more)");
 });
 
+test("a warm-up-only recap names the warm-up round, not a grade called Warm-up twice", () => {
+  const cards = buildRecapCards({ rounds: [{ n: 1, grade: "warmup", warmup: true, score: 30, punches: 33, perMin: 66, xp: 50 }], best: { kind: "chain", str: "1-2", len: 2 }, comboCount: 1, level: 2, title: "Wrap Hands", nextUnlock: null, week: null, heldPct: null, eased: false, demo: false, welcome: 0 });
+  assert.equal(cards[0].title, "Warm-up done. Easy rounds count. Warm-up round: 33 punches · +50 XP");
+  assert.equal(cards[1].title.startsWith("Your longest chain"), true);
+});
+
 test("the demo recap says only the Welcome Bonus is kept", () => {
   const cards = buildRecapCards({ rounds: [{ n: 1, grade: "warmup", score: 30, punches: 20, perMin: 40, xp: 50 }], best: { kind: "chain", str: "1-2" }, comboCount: 1, level: 2, title: "Wrap Hands", nextUnlock: null, week: null, heldPct: null, eased: false, demo: true, welcome: 40 });
   assert.match(cards[2].title, /only your Welcome Bonus/);

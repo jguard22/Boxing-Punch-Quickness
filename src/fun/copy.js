@@ -120,6 +120,8 @@ export const COPY = {
     roundsBig: (n) => `${n} ${plural(n, "round")}`,
     roundsTitle: (grades) => grades,
     roundLine: (n, grade, score, punches, xp) => `Round ${n}: ${grade} ${score} · ${punches} punches · +${xp} XP`,
+    warmLine: (punches, xp) => `Warm-up round: ${punches} punches · +${xp} XP`,
+    warmTitle: "Warm-up done. Easy rounds count.",
     combo: "Combo highlight",
     comboCalled: (j) => `${j} on a coach call`,
     comboLongest: "Your longest chain",

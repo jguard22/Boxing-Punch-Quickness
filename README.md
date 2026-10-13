@@ -10,10 +10,11 @@ single-page family and navy / teal look as the Athletic Explosiveness demo.
 context) — `npm run serve` (tiny static server on <http://127.0.0.1:5362/>), or
 `npx serve .` — or open `index.html` and hit **Simulate** (no hardware).
 
-**Test it:** `npm test` (node, no dependencies — the logic in `core.js`) and
-`npm run smoke` (headless Chrome through playwright-core: drives a 3-round
+**Test it:** `npm test` (node, no dependencies — the logic in `core.js` and the fun layer),
+`npm run smoke` (headless Chrome through playwright-core on the lab view: drives a 3-round
 Simulate session, checks the UI, the unit switch, CSV export, mobile layout and
-zero console errors).
+zero console errors) and `npm run smoke:fun` (the Fight view: first win, coached set, views, reduced motion, forget).
+`npm run shoot:fun` writes the 390 px light, dark and reduced-motion screenshots to `docs/screenshots/fun/`.
 
 ## Files
 | File | What |
@@ -21,9 +22,12 @@ zero console errors).
 | `index.html` | page markup |
 | `styles.css` | all styling; every color / space / size / radius is a `:root` token |
 | `core.js` | pure logic (`window.BPCore` / `require`): detector, classifier, combos, round clock, stats, confusion, weight shift, CSV rows, sim generators |
-| `app.js` | UI, round clock wiring, audio, SDK adapter, Simulate engine |
+| `app.js` | UI, round clock wiring, audio, SDK adapter, Simulate engine; a small event bridge out (`bwfun`) and command bridge in (`bwcmd`) to the fun layer |
+| `fun.css` | the fun layer's styles: the kit's `--fk-*` tokens mapped to this page's tokens, plus the Fight view |
+| `src/fun/` | the fun layer (see "Bag Work" below); `src/vendor/fun-kit/` is the vendored shared kit, never edited here |
 | `test/core.test.mjs` | unit tests for `core.js` (`node --test`) |
-| `scripts/serve.mjs`, `scripts/smoke.mjs` | static server (:5362) and headless smoke test |
+| `test/fun-*.test.mjs`, `test/hygiene.test.mjs` | the fun layer: rules, calls, guardrails, the session controller on a fake page, repo hygiene |
+| `scripts/serve.mjs`, `scripts/smoke.mjs`, `scripts/smoke-fun.mjs`, `scripts/shoot-fun.mjs` | static server (:5362), the lab smoke, the Fight view smoke, the screenshots |
 
 ## Punch detection & speed
 Wrist linear acceleration at 200 Hz (5 ms). Onset = |accel| > 2 g after a
@@ -75,6 +79,50 @@ so you can't lose labels by accident — export first).
 **Per-round output:** punches, punches/min, combos and longest, mean / peak
 speed overall and per type (jab, cross, hook, uppercut), L/R balance (% of
 punches), and mean weight shift.
+
+## Bag Work (the Fight view)
+The page opens in **Fight view**: a rhythm game for your heavy bag. The coach calls a combo ("1-2-3"), you throw it, the bell keeps score.
+Everything the page did before is still there: **Lab** in the header switches to the original page (every card, table and export),
+**Setup** holds the sensor, Simulate, export and reset controls, and **Show lab details** opens the tables under the live cards.
+`?mode=lab` shows the lab view for one visit, `?fun=0` turns the fun layer off entirely (nothing of it is even fetched and no storage is touched).
+
+- **First win in 30 seconds, no setup.** *Start 30-second warm-up* (or *Simulate (no sensors)*, which starts Simulate and the warm-up in one tap) runs a
+  30 s round: the first punch pops with its type and speed, a chain forms a combo string, and at the bell the Round Grade stamp lands, XP counts up and
+  Level 2 opens. The time is measured with `createFirstWin().state().timeToWinMs`. Nothing asks for a name, an account or a permission.
+- **Coach Calls.** After the warm-up, rounds call combos in boxing numbers (stage 1: `1`, `1-2`; stage 2 at Level 2; hooks at 3; uppercuts at 5; four punches
+  at 6; stage 5 at 8). A call opens a window (2.5 s after the last spoken count, or 600 ms after your last punch). Judgments, always shape plus word:
+  **Perfect** (right hands, every type, gaps 450 ms or less, first punch within 1.2 s), **Great**, **Good** (one type different), **Count it?**
+  (right hands, the sensor read other types: one tap counts it for a flat +3 XP and, outside Simulate, saves what you called as the corrected labels)
+  and **Missed**. The judge never fails a combo for the classifier's mistake. **Flow** x1 to x5 rises on Perfect or Great in a row and drops silently.
+- **Round Grade** (Warm-up, Solid, Sharp, Fire; the warm-up round is always Warm-up): calls 40 (pace control 40 in free work), rhythm 35,
+  finish 10, both hands 15. **Strong Finish** compares the last 30 s with the round's own mean speed, never in the warm-up, never after a fade over 25 percent.
+- **XP** comes from rounds, calls and free combos only: free combo +2 (5 a round), called combo +3 / +5 / +8, round +15 (warm-up +10), Strong Finish +10,
+  full session +25. No XP per punch, no XP for relabelling or confirming a label, 12 rounds a day (then 1 XP a round), a 200 XP soft cap a day.
+- **Speed tiers** (Snap, Sharp, Steady, Easy) and speed bests exist only after the first minute of a session and never in the warm-up round.
+  Speeds are stored in m/s and shown as m/s or mph (the header switch) everywhere.
+- **Recap** (three cards: Rounds, Combo highlight, Up next) after every set, with a one-tap *Loved it / Fine / Not for me* that stays on this device with the first-win time.
+- **Simulate is a demo.** It runs on a second kit instance on memory storage: nothing it earns is saved except the one-time Welcome Bonus (+40 XP).
+  The simulated boxer answers calls with a mix of exact, late, wrong-order and short throws so every judgment shows up.
+- **Settings** (all local): motion (follow the device, reduced, full), sounds, coach voice (off by default), coach calls, light / dark, the feedback tap,
+  fun stats (counts only, CSV) and **Forget my data** (`kit.reset()`).
+- **Guardrails.** Bag and pad work only: copy never says damage, knockout, power or force. No haptics are sent in this build (TODO[SDK]); the rule is tested:
+  never inside a punch window or within 350 ms of an onset. Celebrations (confetti, toasts, level-up) wait behind one quiet gate while a round runs.
+  Sounds and speech are optional and every cue has words and a shape on screen. Nothing loops or flashes; reduced motion removes all movement.
+
+### How it is wired
+`app.js` stays a plain script. It dispatches `bwfun` events (`punch`, `round.started`, `round.ended`, `session.done`, `session.reset`, `label.reviewed`, `sim`, ...)
+and listens for `bwcmd` commands (`warmup`, `rounds`, `stop`, `reset`, `sim`, `simAnswer`). `src/fun/boot.js` loads the layer with a dynamic import.
+
+| File | What |
+|---|---|
+| `config.js`, `copy.js` | every number, content table and word; no DOM, no kit import |
+| `rules.js`, `calls.js`, `sim-driver.js`, `recap.js` | pure rules (tiers, gate, Round Grade, XP and caps, the haptic budget, the call ladder and judge, Flow, recap cards); no kit import |
+| `kit.js` | the one `createFunKit` config and the memory-storage Simulate twin |
+| `celebrate.js` | the only file that plays sound, speech or celebrations, behind the quiet gate |
+| `session.js`, `ui.js`, `stats.js`, `prefs.js`, `start.js`, `boot.js` | the controller, the screens, local counts, display preferences, entry |
+
+Measurement and safety code (`core.js`, `app.js`, the rules and the judge) never import the kit; a test greps for it. To update the kit:
+`bash ~/Documents/GitHub/bw-fun-kit/scripts/vendor.sh .` from this repo, then `npm test`.
 
 ## Weight transfer (optional insoles)
 With insoles connected (or **sim insoles** in Simulate) each punch gets a
