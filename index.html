@@ -4,35 +4,127 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Brilliant Wear — Boxing Punch Quickness Demo</title>
-<link rel="stylesheet" href="styles.css?v=3" />
+<link rel="stylesheet" href="styles.css?v=4" />
+<link rel="stylesheet" href="src/vendor/fun-kit/ui/fun-kit.css" />
+<link rel="stylesheet" href="fun.css?v=1" />
+<script>
+  // Before first paint: which view (Fight is the game view, Lab the original page), look and motion. ?fun=0 turns the fun layer off
+  // and shows the original page exactly as it was; ?mode=lab shows the lab view for this visit only.
+  (function () {
+    var r = document.documentElement;
+    try {
+      var q = new URLSearchParams(location.search), off = q.get("fun") === "0", p = {}, saved = null;
+      try { p = JSON.parse(localStorage.getItem("bw-box-fun-v1") || "{}") || {}; saved = localStorage.getItem("bw-box-mode"); } catch (e) { p = {}; }
+      r.dataset.fun = off ? "off" : "on";
+      r.dataset.mode = off ? "lab" : q.get("mode") === "lab" ? "lab" : q.get("mode") === "fight" ? "fight" : saved === "lab" ? "lab" : "fight";
+      r.dataset.theme = off ? "dark" : p.theme === "light" || p.theme === "dark" ? p.theme : (window.matchMedia && matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark");
+      if (!off && (p.motion === "reduce" || p.motion === "full")) r.dataset.motion = p.motion;
+    } catch (e) { r.dataset.fun = "off"; r.dataset.mode = "lab"; r.dataset.theme = "dark"; }
+  })();
+</script>
 </head>
 <body>
-<header>
+<header id="top">
   <div class="brand">
     <h1>BRILLIANT<span class="thin">WEAR</span></h1>
     <span class="sub">Boxing Punch Quickness — speed · type · combos · rounds</span>
   </div>
   <div class="controls">
-    <button id="btn-left">Connect Left Wrist</button>
-    <button id="btn-right">Connect Right Wrist</button>
-    <button id="btn-insoles" title="Optional — adds weight transfer per punch">Connect Insoles (optional)</button>
-    <button id="btn-stance">Stance: Orthodox</button>
-    <button id="btn-sim">Simulate</button>
-    <label class="toggle" title="Simulate the insole channel too"><input type="checkbox" id="sim-insoles" checked /> sim insoles</label>
-    <label class="toggle" title="In Simulate, tag every punch with the type the generator threw so the confusion matrix fills in"><input type="checkbox" id="sim-truth" checked /> sim labels truth</label>
+    <div class="seg fun-only" id="mode-seg" role="group" aria-label="View">
+      <button data-mode="fight" class="on" aria-pressed="true" title="Game view: warm-up, coach calls, grades">Fight</button><button data-mode="lab" aria-pressed="false" title="Lab view: every card, table and export">Lab</button>
+    </div>
+    <button id="btn-setup" class="fun-only" aria-expanded="false" aria-controls="setup-tools setup-tools-2" title="Sensors, simulate, exports and reset">Setup</button>
+    <span class="setup-group setup-tool" id="setup-tools">
+      <button id="btn-left">Connect Left Wrist</button>
+      <button id="btn-right">Connect Right Wrist</button>
+      <button id="btn-insoles" title="Optional — adds weight transfer per punch">Connect Insoles (optional)</button>
+      <button id="btn-stance">Stance: Orthodox</button>
+      <button id="btn-sim">Simulate</button>
+      <label class="toggle" title="Simulate the insole channel too"><input type="checkbox" id="sim-insoles" checked /> sim insoles</label>
+      <label class="toggle" title="In Simulate, tag every punch with the type the generator threw so the confusion matrix fills in"><input type="checkbox" id="sim-truth" checked /> sim labels truth</label>
+    </span>
     <span class="seg-label">Speed</span>
     <div class="seg" id="units-seg" role="group" aria-label="Speed units">
       <button data-unit="ms" class="on" aria-pressed="true">m/s</button><button data-unit="mph" aria-pressed="false">mph</button>
     </div>
-    <button id="btn-export">Export Punches CSV</button>
-    <button id="btn-export-rounds">Export Rounds CSV</button>
-    <button id="btn-reset" class="danger">Reset session</button>
+    <span class="setup-group setup-tool" id="setup-tools-2">
+      <button id="btn-export">Export Punches CSV</button>
+      <button id="btn-export-rounds">Export Rounds CSV</button>
+      <button id="btn-reset" class="danger">Reset session</button>
+    </span>
   </div>
 </header>
 
-<div class="grid">
+<nav class="sections fun-only" aria-label="Sections">
+  <a href="#play">Play</a><a href="#live">Punches</a><a href="#lab">Lab details</a><a href="#fun-settings">Settings</a>
+</nav>
+
+<!-- play: level, warm-up hero, coach calls, round grade (Fight view) -->
+<section id="play" class="play fun-only" aria-labelledby="hero-title">
+  <div id="fun-status" class="fun-status"></div>
+
+  <div id="fun-hero" class="card hero">
+    <h2 id="hero-title" class="hero-title">Bag work, but it talks back.</h2>
+    <p class="hero-sub" id="hero-sub">The coach calls a combo, you throw it, the bell keeps score.</p>
+    <div class="row hero-actions">
+      <button class="primary big" id="hero-warmup">Start 30-second warm-up</button>
+      <button class="big" id="hero-sim">Simulate (no sensors)</button>
+      <button class="ghost big" id="hero-warm" hidden>Warm-up again (30 seconds)</button>
+    </div>
+    <p class="hero-hint" id="hero-hint" role="status" hidden></p>
+    <p class="safety" id="hero-safety">Wrap your hands. Warm up first. Stop if anything hurts.</p>
+  </div>
+
+  <div id="fun-stage" class="card stage" hidden>
+    <h2>Coach <span class="tag"><span id="stage-phase">Warm-up</span> · <span id="stage-time">0:30</span></span></h2>
+    <div class="stage-bar">
+      <span class="chip flow" id="stage-flow" hidden>Flow x1</span>
+      <button class="ghost sm" id="stage-voice" aria-pressed="false" title="Speak each call out loud">Voice off</button>
+      <button class="ghost sm" id="stage-stop">Stop</button>
+    </div>
+    <div class="call" id="call-banner" hidden>
+      <div class="call-main">
+        <div class="call-digits" id="call-digits" aria-hidden="true"></div>
+        <div class="call-names" id="call-names"></div>
+      </div>
+      <svg class="call-ring" id="call-ring" viewBox="0 0 36 36" aria-hidden="true" hidden><circle class="ring-track" cx="18" cy="18" r="15.9155"/><circle class="ring-bar" id="ring-bar" cx="18" cy="18" r="15.9155" pathLength="100"/></svg>
+    </div>
+    <div class="stamp" id="call-stamp" hidden></div>
+    <div class="countit" id="countit" hidden>
+      <span id="countit-text"></span>
+      <button class="primary" id="btn-countit">Count it</button>
+    </div>
+    <div class="live-row" id="stage-live" aria-hidden="true">
+      <span class="badge pt-jab" id="stage-last">—</span>
+      <span class="live-speed"><b id="stage-speed">—</b><span class="unit u-speed">m/s</span></span>
+      <span class="combo-str" id="stage-combo">—</span>
+      <span class="tier" id="stage-tier" hidden></span>
+    </div>
+    <p class="coach-line" id="coach-line">Coach calls start with your next round.</p>
+  </div>
+
+  <div id="fun-grade" class="card grade" hidden>
+    <h2>Round Grade <span class="tag" id="grade-tag"></span></h2>
+    <div class="grade-row">
+      <div class="grade-stamp" id="grade-stamp" aria-hidden="true"></div>
+      <div class="grade-info">
+        <div class="grade-xp" id="grade-xp"></div>
+        <div class="grade-line" id="grade-line"></div>
+        <div class="ribbon" id="grade-ribbon" hidden></div>
+      </div>
+    </div>
+    <div class="grade-parts" id="grade-parts"></div>
+    <p class="note" id="grade-note"></p>
+    <div class="row grade-actions" id="grade-actions" hidden>
+      <button class="primary" id="grade-recap">Recap</button>
+      <button id="grade-again">Play again</button>
+    </div>
+  </div>
+</section>
+
+<div class="grid" id="live">
   <!-- round clock -->
-  <div class="card">
+  <div class="card" id="card-clock">
     <h2>Rounds <span class="tag" id="clock-sub">3 min round · 1 min rest</span></h2>
     <div class="clock" id="clock">
       <div class="clock-phase" id="clock-phase">Ready</div>
@@ -50,20 +142,22 @@
     </div>
   </div>
 
-  <div class="card">
+  <div class="card" id="card-last">
     <h2>Last Punch <span class="tag">auto-classified</span></h2>
     <div class="last-head">
       <span class="badge pt-jab" id="last-type">—</span>
       <span class="badge sm hand-badge hand-L" id="last-hand" hidden>L</span>
+      <span class="tier fun-only" id="last-tier" hidden></span>
     </div>
     <div class="row">
       <div class="kv"><div class="v"><span id="last-speed">—</span><span class="unit u-speed">m/s</span></div><div class="k">hand speed</div></div>
       <div class="kv"><div class="v"><span id="last-g">—</span><span class="unit">g</span></div><div class="k">peak accel</div></div>
       <div class="kv"><div class="v" id="last-combo">—</div><div class="k">in combo</div></div>
     </div>
+    <p class="note fun-only" id="last-note" hidden></p>
   </div>
 
-  <div class="card">
+  <div class="card" id="card-count">
     <h2>Punch Count <span class="tag" id="rate">0 /min</span></h2>
     <div><span class="big" id="count-total">0</span><span class="unit">total</span></div>
     <div class="sub2">L <b id="count-L">0</b> · R <b id="count-R">0</b> · best <b id="best-speed">—</b> <span class="u-speed">m/s</span></div>
@@ -71,7 +165,7 @@
   </div>
 
   <!-- combos / weight transfer / reaction -->
-  <div class="card">
+  <div class="card" id="card-combos">
     <h2>Combos <span class="tag" id="combo-count">0 combos</span></h2>
     <div class="combo-str" id="combo-cur">—</div>
     <div class="combo-names" id="combo-names">latest combination, boxing numbers</div>
@@ -80,7 +174,12 @@
     <div class="note">1 jab · 2 cross · 3/4 lead/rear hook · 5/6 lead/rear uppercut. Punches under 600 ms apart chain into one combo.</div>
   </div>
 
-  <div class="card">
+  <div class="lab-toggle fun-only" id="lab">
+    <h2>Lab details <span class="tag">every table, chart and export</span></h2>
+    <button id="btn-lab" aria-expanded="false" aria-controls="lab-cards">Show lab details</button>
+  </div>
+
+  <div class="card lab-card" id="lab-cards">
     <h2>Weight Transfer <span class="tag"><span class="chip" id="wt-state">no insoles</span></span></h2>
     <div class="row">
       <div class="kv"><div class="v"><span id="wt-last">—</span><span class="unit">pp</span></div><div class="k">last punch</div></div>
@@ -91,7 +190,7 @@
     <div class="sub2" id="wt-types">Connect insoles (or Simulate with sim insoles) for front/back foot load shift per punch.</div>
   </div>
 
-  <div class="card">
+  <div class="card lab-card">
     <h2>Reaction Drill <span class="tag">beep → punch</span></h2>
     <div class="go-light" id="go-light"></div>
     <div class="row center"><button class="primary" id="btn-go">Arm GO (space)</button></div>
@@ -102,7 +201,7 @@
   </div>
 
   <!-- summary -->
-  <div class="card span12" id="summary-card">
+  <div class="card span12 lab-card" id="summary-card">
     <h2>Session Summary <span class="tag" id="summary-tag">waiting for punches</span></h2>
     <div class="kpis" id="kpis"></div>
     <div class="notes" id="notes"></div>
@@ -113,20 +212,20 @@
   </div>
 
   <!-- per round -->
-  <div class="card span12">
+  <div class="card span12 lab-card">
     <h2>Per-Round Output <span class="tag">speed shown as mean / peak</span></h2>
     <div class="scroll" id="round-wrap"></div>
   </div>
 
   <!-- fatigue + confusion -->
-  <div class="card span5">
+  <div class="card span5 lab-card">
     <h2>Fatigue Curve <span class="tag" id="fx-tag">% of first round</span></h2>
     <div id="fx-wrap"></div>
     <div class="legend"><span><i class="s"></i>hand speed</span><span><i class="r"></i>punches / min</span></div>
     <div class="note">Mean hand speed and output per round, indexed to the first round (100%). Needs two rounds with 3+ punches each.</div>
   </div>
 
-  <div class="card span7">
+  <div class="card span7 lab-card">
     <h2>Confusion Matrix <span class="tag" id="cm-tag">0 reviewed</span></h2>
     <div id="cm-wrap"></div>
     <div class="row cm-actions">
@@ -136,7 +235,7 @@
   </div>
 
   <!-- punch log -->
-  <div class="card span12">
+  <div class="card span12 lab-card">
     <h2>Punch Log <span class="tag">correct the type if the auto-label is wrong — trains the classifier</span></h2>
     <div class="scroll tall">
       <table id="punch-table">
@@ -147,11 +246,52 @@
     <div class="note">v1 heuristic: vertical-dominant rise ⇒ uppercut · high rotation/curvature ⇒ hook · else straight (jab = lead hand, cross = rear, from stance). Every punch logs its feature vector to CSV for the ML classifier. Showing the latest 60; the CSV has all of them.</div>
   </div>
 
-  <div class="card span12">
+  <div class="card span12 lab-card">
     <h2>Session Log</h2>
     <div id="log"></div>
   </div>
 </div>
+
+<section id="fun-settings" class="card fun-only settings-card" aria-labelledby="fs-title">
+  <h2 id="fs-title">Settings <span class="tag">Everything here stays on this device.</span></h2>
+  <div class="setting"><span class="setting-name" id="lbl-motion">Motion</span>
+    <div class="seg" id="seg-motion" role="group" aria-labelledby="lbl-motion">
+      <button data-v="auto">Follow my device</button><button data-v="reduce">Reduced</button><button data-v="full">Full</button>
+    </div></div>
+  <div class="setting"><span class="setting-name" id="lbl-sound">Sounds</span>
+    <div class="seg" id="seg-sound" role="group" aria-labelledby="lbl-sound"><button data-v="on">On</button><button data-v="off">Off</button></div></div>
+  <div class="setting"><span class="setting-name" id="lbl-voice">Coach voice</span>
+    <div class="seg" id="seg-voice" role="group" aria-labelledby="lbl-voice"><button data-v="on">On</button><button data-v="off">Off</button></div></div>
+  <div class="setting"><span class="setting-name" id="lbl-calls">Coach calls</span>
+    <div class="seg" id="seg-calls" role="group" aria-labelledby="lbl-calls"><button data-v="on">On</button><button data-v="off">Off</button></div></div>
+  <div class="setting"><span class="setting-name" id="lbl-theme">Look</span>
+    <div class="seg" id="seg-theme" role="group" aria-labelledby="lbl-theme"><button data-v="auto">Auto</button><button data-v="light">Light</button><button data-v="dark">Dark</button></div></div>
+  <div class="setting"><span class="setting-name" id="lbl-fb">Was this fun?</span>
+    <div class="seg" id="seg-feedback" role="group" aria-labelledby="lbl-fb"><button data-v="loved">Loved it</button><button data-v="fine">Fine</button><button data-v="notForMe">Not for me</button></div></div>
+  <p class="note" id="fb-note">One tap. It stays on this device with your first-win time.</p>
+  <div class="setting"><span class="setting-name">Fun stats on this device</span>
+    <span class="note flat" id="stats-line"></span>
+    <button class="ghost sm" id="btn-stats">Download fun stats CSV</button></div>
+  <p class="note">Counts only. No sensor values and no names.</p>
+  <div class="row"><button class="danger" id="btn-forget">Forget my data</button><span class="note flat" id="forget-note"></span></div>
+  <p class="note">Clears XP, badges, bests, answers and fun stats on this device. Your punches and timer settings stay.</p>
+</section>
+
+<dialog id="fun-recap" class="recap-dialog" aria-labelledby="recap-title">
+  <div class="recap-head"><h2 id="recap-title">Your round</h2><button id="recap-close" class="ghost sm" aria-label="Close recap">Close</button></div>
+  <div id="recap-body"></div>
+  <div class="feedback" id="recap-feedback" hidden>
+    <span id="fb-ask">How was that?</span>
+    <div class="seg" id="seg-recap-fb" role="group" aria-label="How was that?"><button data-v="loved">Loved it</button><button data-v="fine">Fine</button><button data-v="notForMe">Not for me</button></div>
+  </div>
+  <p class="note" id="recap-note"></p>
+  <div class="row recap-cta">
+    <button class="primary" id="recap-cta">Round 1: Coach Calls</button>
+    <button class="ghost" id="recap-later">Not now</button>
+    <button class="ghost sm" id="recap-export">Export punches CSV</button>
+  </div>
+</dialog>
+<div id="fun-live" class="sr-only" role="status" aria-live="polite" aria-atomic="true"></div>
 
 <footer>
   Live over Web Bluetooth via the <a href="https://github.com/brilliantsole/BrilliantWear-JavaScript-SDK">Brilliant Wear JavaScript SDK</a>.
@@ -161,6 +301,7 @@
 
 <script src="https://unpkg.com/brilliantsole@latest/build/brilliantsole.js"></script>
 <script src="core.js?v=3"></script>
-<script src="app.js?v=3"></script>
+<script src="app.js?v=4"></script>
+<script type="module" src="src/fun/boot.js"></script>
 </body>
 </html>

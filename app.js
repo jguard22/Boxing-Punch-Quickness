@@ -30,10 +30,17 @@
     go: { armed: false, at: null, timer: null, best: null },
     insole: { buf: [], load: { left: 0, right: 0 }, last: { left: -Infinity, right: -Infinity } },
     sim: false, simInsoles: true, simTruth: true,
+    wrists: { L: false, R: false },   // which wrist Senses are connected (the fun layer's first screen reads it)
+    preset: null,                     // { kind: "warmup", roundMs, restMs, rounds } while a one-off round set runs; never saved
     audio: null, tableDirty: false, resetTimer: null, tick: 0,
   };
   const now = () => performance.now();
   const $ = (id) => document.getElementById(id);
+  // The bridge to the fun layer (src/fun, loaded after this file). One-way events out, a few commands in; this file never imports it.
+  // Events: punch, round.started, round.warn, round.ended, session.done, session.stopped, session.reset, label.reviewed, label.bulk,
+  // device, sim, stance.changed, units. Nothing here is awaited and a listener that throws cannot break detection.
+  const fun = (type, d = {}) => { try { window.dispatchEvent(new CustomEvent("bwfun", { detail: { type, ...d, sim: S.sim } })); } catch { /* the fun layer is optional */ } };
+  const hooks = { simBusy: null };    // set by the fun layer: true while a coach call is open, so the simulator waits instead of talking over it
   const lead = () => (S.stance === "orthodox" ? "L" : "R");
   const leadSide = () => (lead() === "L" ? "left" : "right");
   const fs = (v, d = 1) => C.fmtSpeed(v, S.unit, d);
@@ -115,6 +122,7 @@
       $("btn-go").classList.remove("armed");
     }
     renderAll();
+    fun("punch", { p });
   }
 
   // ---------- rendering ----------
@@ -331,8 +339,9 @@
     $("set-bell").checked = S.bell;
   }
   function renderClock() {
-    const st = S.settings, roundMs = st.roundMin * 60000, restMs = st.restMin * 60000;
-    $("clock-sub").textContent = `${fmtDur(roundMs)} round · ${fmtDur(restMs)} rest × ${st.rounds}`;
+    const st = S.preset ? { roundMin: S.preset.roundMs / 60000, restMin: S.preset.restMs / 60000, rounds: S.preset.rounds } : S.settings;
+    const roundMs = st.roundMin * 60000, restMs = st.restMin * 60000;
+    $("clock-sub").textContent = S.preset?.kind === "warmup" ? `${fmtDur(roundMs)} warm-up round` : `${fmtDur(roundMs)} round · ${fmtDur(restMs)} rest × ${st.rounds}`;
     const ph = S.clock ? S.clock.phaseAt(now()) : { phase: "idle", n: 0, elapsedMs: 0, remainingMs: roundMs, phaseMs: roundMs };
     const total = S.clock ? S.clock.cfg.rounds : st.rounds;
     const warn = ph.phase === "round" && ph.remainingMs <= CFG.warnMs && roundMs > CFG.warnMs * 2;
@@ -349,11 +358,14 @@
     for (const id of ["set-round", "set-rest", "set-rounds"]) $(id).disabled = locked;
   }
 
-  function startRounds() {
+  // preset: a one-off round set (the 30-second warm-up) that does not read or save the timer settings.
+  function startRounds(preset = null) {
     if (S.clock?.running) { handleClock(S.clock.stop(now())); return; }
     if (S.rounds.length) { log("Reset the session before starting another set of rounds (export the CSV first to keep this one).", "warn"); return; }
-    readSettings(); savePrefs();
-    S.clock = C.createRoundClock({ roundMs: S.settings.roundMin * 60000, restMs: S.settings.restMin * 60000, rounds: S.settings.rounds, warnMs: CFG.warnMs });
+    S.preset = preset;
+    if (!preset) { readSettings(); savePrefs(); }
+    const cfg = preset ?? { roundMs: S.settings.roundMin * 60000, restMs: S.settings.restMin * 60000, rounds: S.settings.rounds, warnMs: CFG.warnMs };
+    S.clock = C.createRoundClock({ roundMs: cfg.roundMs, restMs: cfg.restMs, rounds: cfg.rounds, warnMs: cfg.warnMs ?? CFG.warnMs });
     S.sessionDone = false;
     ensureAudio();
     handleClock(S.clock.start(now()));
@@ -365,9 +377,11 @@
         S.rounds.push({ n: ev.n, startT: ev.t, endT: null });
         bell(1);
         log(`Round ${ev.n} of ${N} — go.`, "ok");
+        fun("round.started", { n: ev.n, total: N, t: ev.t, roundMs: S.clock.cfg.roundMs, preset: S.preset?.kind ?? null });
       } else if (ev.type === "warn") {
         clap();
         log(`Round ${ev.n}: 10 seconds.`, "warn");
+        fun("round.warn", { n: ev.n });
       } else if (ev.type === "roundEnd" || (ev.type === "stopped" && ev.phase === "round")) {
         const r = S.rounds.find((x) => x.n === ev.n);
         if (r && r.endT == null) r.endT = ev.t;
@@ -375,11 +389,13 @@
         S.combos = C.annotateCombos(S.punches, CFG.comboGapMs);
         const rs = buildSess(ev.t).rounds.find((x) => x.n === ev.n);
         if (rs) log(`Round ${ev.n} ${ev.type === "stopped" ? "stopped" : "done"}: ${rs.count} punches, ${rs.perMin == null ? "—" : rs.perMin.toFixed(0)}/min, mean ${fs(rs.meanV)} ${C.speedLabel(S.unit)}, ${rs.combos} combos.`, "ok");
+        fun("round.ended", { n: ev.n, t: ev.t, stopped: ev.type === "stopped", summary: rs ?? null, roundMs: S.clock.cfg.roundMs, total: N, preset: S.preset?.kind ?? null });
       } else if (ev.type === "restStart") {
         log(`Rest — ${fmtDur(S.settings.restMin * 60000)}.`);
       } else if (ev.type === "done") {
         S.sessionDone = true;
         log(`All ${N} rounds complete — summary below.`, "ok");
+        fun("session.done", { total: N, preset: S.preset?.kind ?? null });
         if (S.sim) simStop();
       }
       if (ev.type === "stopped") {
@@ -387,6 +403,7 @@
           if (r.endT == null) r.endT = Math.min(ev.t, r.startT + S.clock.cfg.roundMs);
         }
         log("Rounds stopped.", "warn");
+        fun("session.stopped", { preset: S.preset?.kind ?? null });
         if (S.sim) simStop();
       }
     }
@@ -487,6 +504,8 @@
         this.devices[hand] = device;
         device.addEventListener("isConnected", () => {
           $(hand === "L" ? "btn-left" : "btn-right").classList.toggle("connected", device.isConnected);
+          S.wrists[hand] = !!device.isConnected;
+          fun("device", { hand, on: !!device.isConnected });
           if (device.isConnected) {
             device.setSensorConfiguration({ linearAcceleration: CFG.rateMs, gameRotation: CFG.rateMs * 2 });
             log(`${hand} wrist connected @ ${CFG.rateMs}ms.`);
@@ -574,18 +593,35 @@
     const frac = ph.phaseMs ? ph.elapsedMs / ph.phaseMs : 0;
     return { scale: 1 - 0.045 * (ph.n - 1) - 0.03 * frac, slow: 1 + 0.12 * (ph.n - 1) };
   }
-  function simNextCombo() {
-    if (!S.sim) return;
-    const ph = S.clock ? S.clock.phaseAt(now()) : null;
-    if (ph && ph.phase !== "round") { later(simNextCombo, 250); return; }       // rest between rounds
-    const { scale, slow } = simFatigue(ph);
+  // Throw a combo (boxing numbers) at the paced rhythm of the simulator; returns how long it takes in ms.
+  function simThrowCombo(nums, scale, slow) {
     let off = 0, prevHand = null;
-    for (const [hand, kind] of C.comboToThrows(C.pickCombo(Sim.rng), lead())) {
+    for (const [hand, kind] of C.comboToThrows(nums, lead())) {
       later(() => simThrow(hand, kind, scale), off);
       off += (prevHand === hand ? 520 + Sim.rng() * 60 : 330 + Sim.rng() * 110) * slow;
       prevHand = hand;
     }
+    return off;
+  }
+  function simNextCombo() {
+    if (!S.sim) return;
+    const ph = S.clock ? S.clock.phaseAt(now()) : null;
+    if (ph && ph.phase !== "round") { later(simNextCombo, 250); return; }       // rest between rounds
+    if (hooks.simBusy?.()) { later(simNextCombo, 200); return; }                // a coach call is open: the call's answer comes from the fun layer
+    const { scale, slow } = simFatigue(ph);
+    const off = simThrowCombo(C.pickCombo(Sim.rng), scale, slow);
     later(simNextCombo, off + (900 + Sim.rng() * 1300) * slow);
+  }
+  // The fun layer asks for a particular combo (the simulated boxer answering a coach call).
+  function simAnswer(nums, delayMs) {
+    if (!S.sim || !Array.isArray(nums) || !nums.length) return;
+    later(() => {
+      if (!S.sim) return;
+      const ph = S.clock ? S.clock.phaseAt(now()) : null;
+      if (ph && ph.phase !== "round") return;
+      const { scale, slow } = simFatigue(ph);
+      simThrowCombo(nums, scale, slow);
+    }, Math.max(0, delayMs || 0));
   }
   function simStart() {
     if (S.sim) return;
@@ -597,6 +633,7 @@
     if (S.simInsoles) Sim.insoleTimer = setInterval(simInsoleTick, 10);
     log("Simulate: boxing combinations (1-2, 1-2-3, 1-2-5-2 …) — both hands, mixed types, fading across rounds.", "ok");
     later(simNextCombo, 300);
+    fun("sim", { on: true });
   }
   function simStop() {
     if (!S.sim) return;
@@ -608,13 +645,14 @@
     $("btn-sim").classList.remove("connected");
     $("btn-sim").textContent = "Simulate";
     log("Simulate stopped.");
+    fun("sim", { on: false });
   }
 
   // ---------- session reset ----------
   function resetSession() {
     if (S.sim) simStop();
     clearTimeout(S.go.timer);
-    S.punches = []; S.combos = []; S.rounds = []; S.clock = null; S.sessionDone = false;
+    S.punches = []; S.combos = []; S.rounds = []; S.clock = null; S.sessionDone = false; S.preset = null;
     S.go = { armed: false, at: null, timer: null, best: null };
     S.insole.buf = [];
     detector.reset();
@@ -622,6 +660,7 @@
     $("go-light").className = "go-light"; $("btn-go").classList.remove("armed");
     renderClock(); renderAll();
     log("Session cleared.", "warn");
+    fun("session.reset");
   }
 
   // ---------- summary copy ----------
@@ -649,6 +688,7 @@
     S.stance = S.stance === "orthodox" ? "southpaw" : "orthodox";
     e.target.textContent = `Stance: ${S.stance[0].toUpperCase()}${S.stance.slice(1)}`;
     log(`Stance → ${S.stance} (${S.stance === "orthodox" ? "left" : "right"} lead).`);
+    fun("stance.changed", { stance: S.stance });
   });
   $("btn-go").addEventListener("click", armGo);
   $("btn-sim").addEventListener("click", () => (S.sim ? simStop() : simStart()));
@@ -662,7 +702,7 @@
   $("sim-truth").addEventListener("change", (e) => { S.simTruth = e.target.checked; });
   $("btn-export").addEventListener("click", exportCsv);
   $("btn-export-rounds").addEventListener("click", exportRoundsCsv);
-  $("btn-rounds").addEventListener("click", startRounds);
+  $("btn-rounds").addEventListener("click", () => startRounds());
   $("btn-copy").addEventListener("click", copySummary);
   $("btn-reset").addEventListener("click", (e) => {
     const b = e.currentTarget;
@@ -677,6 +717,7 @@
   });
   document.querySelectorAll("#units-seg button").forEach((b) => b.addEventListener("click", () => {
     S.unit = b.dataset.unit; savePrefs(); renderUnits(); renderAll(); renderClock();
+    fun("units", { unit: S.unit });
   }));
   const SETTING_KEY = { "set-round": "roundMin", "set-rest": "restMin", "set-rounds": "rounds" };
   for (const id of ["set-round", "set-rest", "set-rounds"]) $(id).addEventListener("change", () => {
@@ -689,6 +730,7 @@
     for (const p of S.punches) if (p.trueType == null) { p.trueType = p.type; n++; }
     log(`Marked ${n} unreviewed punch${n === 1 ? "" : "es"} as correct.`);
     renderAll();
+    fun("label.bulk", { n });
   });
   $("punch-table").tBodies[0].addEventListener("change", (e) => {
     const sel = e.target.closest("select");
@@ -696,17 +738,32 @@
     const punch = S.punches.find((x) => x.n === Number(sel.dataset.punch));
     if (!punch) return;
     const v = sel.value;
+    const before = punch.trueType;
     punch.trueType = v === "" ? null : v === "=" ? punch.type : v;
     if (v === "") log(`Punch ${punch.n}: review cleared.`);
     else if (punch.trueType === punch.type) log(`Punch ${punch.n}: ${punch.type} confirmed.`);
     else log(`Punch ${punch.n}: corrected ${punch.type} → ${punch.trueType}.`);
     sel.blur();
     renderAll();
+    if (v !== "") fun("label.reviewed", { p: punch, from: before, to: punch.trueType });
   });
   $("punch-table").addEventListener("focusout", () => { if (S.tableDirty) setTimeout(renderAll, 0); });
   document.addEventListener("keydown", (e) => {
     if (e.code !== "Space" || /^(INPUT|SELECT|TEXTAREA|BUTTON)$/.test(e.target.tagName)) return;
     e.preventDefault(); armGo();
+  });
+
+  // Commands from the fun layer (the other half of the bridge). Each is a thin call into code that already exists above.
+  window.addEventListener("bwcmd", (e) => {
+    const d = e.detail || {};
+    if (d.cmd === "warmup") startRounds({ kind: "warmup", roundMs: d.roundMs, restMs: d.restMs, rounds: d.rounds, warnMs: d.warnMs });
+    else if (d.cmd === "rounds") startRounds();
+    else if (d.cmd === "stop") { if (S.clock?.running) handleClock(S.clock.stop(now())); }
+    else if (d.cmd === "reset") resetSession();
+    else if (d.cmd === "sim") { if (!!d.on !== S.sim) (d.on ? simStart() : simStop()); }
+    else if (d.cmd === "simAnswer") simAnswer(d.nums, d.delayMs);
+    else if (d.cmd === "refresh") renderAll();
+    else if (d.cmd === "log") log(String(d.text ?? "").slice(0, 200), d.cls || "");
   });
 
   loadPrefs();
@@ -717,6 +774,6 @@
   renderClock();
   renderAll();
   setInterval(clockTick, 100);
-  window.__bwBoxing = { S, core: C };   // debug / test hook (read-only use)
+  window.__bwBoxing = { S, core: C, hooks, detector };   // debug / test hook (read-only use); the fun layer reads S and sets hooks.simBusy
   log("Ready. Connect both wrist Sense units (insoles optional), or hit Simulate.");
 })();
