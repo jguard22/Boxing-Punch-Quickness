@@ -73,6 +73,23 @@ try {
     await page.context().close();
   }
 
+  // ---- A2: if the fun layer cannot load (a browser or a file:// page that refuses modules), the page is the original page
+  {
+    // no error collectors here: the failed fetch and the layer's own warning are what this case is about
+    const ctx = await browser.newContext({ viewport: { width: 390, height: 844 } });
+    const page = await ctx.newPage();
+    await page.route("**/unpkg.com/**", (r) => r.fulfill({ status: 200, contentType: "text/javascript", body: "/* stub */" }));
+    await page.route("**/src/fun/start.js*", (r) => r.abort());
+    await page.goto(PAGE);
+    await page.waitForTimeout(1500);
+    check(await page.evaluate(() => document.documentElement.dataset.fun === "off" && document.documentElement.dataset.mode === "lab"), "fallback: the layer failed to load, the original page is shown");
+    check((await visible(page, "#btn-sim")) && (await visible(page, "#punch-table")) && !(await visible(page, "#fun-hero")), "fallback: every control and card is there, no dead hero");
+    await page.click("#btn-sim");
+    await page.waitForTimeout(1500);
+    check(Number(await txt(page, "#count-total")) > 0, "fallback: Simulate still works");
+    await ctx.close();
+  }
+
   // ---- B: Lab and Fight views, and the way between them
   {
     const page = await newPage();
@@ -152,6 +169,9 @@ try {
   const xp = await page.evaluate(() => ({ real: window.__bwFun.kit.xp.info(), demo: window.__bwFun.getDemoKit().xp.info(), keys: Object.keys(localStorage).filter((k) => k.startsWith("fk:boxing-demo:")) }));
   check(xp.demo.level >= 2 && xp.real.total === 40, `demo profile reached Level ${xp.demo.level}; the real profile kept only the Welcome Bonus (${xp.real.total} XP)`);
   check(!xp.keys.some((k) => /badges|streak|pb$/.test(k)), "no demo badge, streak or best was saved");
+  check(await visible(page, "#ics-box"), "the recap offers Add my next session (a downloadable calendar file)");
+  check(await page.evaluate(() => !document.getElementById("card-book").hidden && document.querySelectorAll("#book-list .book-page").length >= 11), "the Combo Book appears after the first combo, with its named pages");
+  check(await page.evaluate(() => document.getElementById("card-pb").hidden), "no personal best from the warm-up round");
   // the one-tap feedback
   check(await visible(page, "#recap-feedback"), "Loved it / Fine / Not for me is on the first recap");
   await page.click('#seg-recap-fb button[data-v="loved"]');
@@ -177,6 +197,7 @@ try {
   await until(page, () => document.getElementById("fun-recap").open, 90000, "the coached recap");
   const set = await page.evaluate(() => window.__bwFun.set.rounds.map((r) => ({ n: r.n, grade: r.grade, calls: r.calls.length, xp: r.xp })));
   check(set.length === 2 && set.every((r) => r.calls >= 1), `two rounds graded with calls (${JSON.stringify(set)})`);
+  check(await page.evaluate(() => [...document.querySelectorAll("#book-list .book-page")].some((li) => li.dataset.locked === "0" && /Perfect|Great|Good|Free work|Counted/.test(li.textContent))), "Combo Book pages fill in with their best judgment");
   check((await txt(page, "#recap-cta")) === "Play again", "coached recap offers Play again");
   await page.screenshot({ path: path.join(OUT, "06-coached-recap.png"), fullPage: false });
   await page.click("#recap-later");

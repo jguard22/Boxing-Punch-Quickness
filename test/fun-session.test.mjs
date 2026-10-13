@@ -27,7 +27,8 @@ function makeEnv({ sim = false, wrists = { L: true, R: false }, rounds = 3 } = {
   };
   env.view = new Proxy({}, { get: (_, name) => (...args) => { env.views.push([name, ...args]); } });
   env.kit = makeKit({ storage: createMemoryStorage() });
-  env.session = createSession({ view: env.view, win: env.win, now: () => env.t, wall: () => EPOCH + env.t, kit: env.kit });
+  env.downloads = [];
+  env.session = createSession({ view: env.view, win: env.win, now: () => env.t, wall: () => EPOCH + env.t, kit: env.kit, download: (ics, name) => env.downloads.push({ ics, name }) });
   env.session.start();
   envs.push(env);
   env.emit = (type, d = {}) => env.session.onEvent({ type, sim: S.sim, ...d });
@@ -238,7 +239,7 @@ test("twelve rounds a day, then a round pays 1 XP", () => {
   const outcome = env.session._state.set.rounds[0].outcome;
   const session = outcome.xp.applied.find((a) => a.source === "session");
   assert.equal(session.amount, XP.afterRounds);
-  assert.equal(env.seen("gradeCard").at(-1)[1].note, "That's a full day on the bag. Cool down.");
+  assert.ok(env.seen("gradeCard").at(-1)[1].note.startsWith("That's a full day on the bag. Cool down."));
 });
 
 test("a round with no punches earns no round bonus and says so", () => {
@@ -341,4 +342,87 @@ test("with no sensor and no Simulate, starting says what to do and sends no comm
   env.session.startWarmup();
   assert.equal(env.cmds.at(-1).cmd, "warmup");
   assert.equal(env.cmds.at(-1).roundMs, 30000);
+});
+
+test("Combo Book: a called combo and a free chain each get a page; the book is on the profile that played, and the badge opens at five", () => {
+  const env = makeEnv();
+  env.startRound({ roundMs: 180000 });
+  env.session._state.round.schedule = [{ atMs: 0, call: "1-2" }];
+  env.session._tick();
+  const ps = answer([1, 2], { t0: env.t + 600, gapMs: 250 }).map((p) => ({ ...p, round: 1 }));
+  for (const p of ps) { env.t = p.startT; env.throw(p); }
+  env.t = ps.at(-1).t + 700; env.session._tick();
+  // a free chain after the call: 1-2-3
+  let t = env.t + 5000;
+  for (const [i, [hand, type]] of [["L", "jab"], ["R", "cross"], ["L", "hook"]].entries()) { env.t = t; env.throw({ startT: t, hand, type }); t += 170 + 250; }
+  env.endRound({ roundMs: 180000 });
+  const book = env.kit.store.get("book", {});
+  assert.deepEqual(book["1-2"], { count: 1, best: "perfect" });
+  assert.deepEqual(book["1-2-3"], { count: 1, best: "free" });
+  assert.deepEqual(env.session._state.set.rounds[0].added.map((a) => a.name), ["One-Two", "Classic"]);
+  assert.match(env.seen("gradeCard").at(-1)[1].note, /New in your Combo Book: One-Two, Classic\./);
+  const shown = env.seen("book").at(-1)[1];
+  assert.equal(shown.show, true);
+  assert.equal(shown.counts.named, 2);
+});
+
+test("Combo Book: Simulate fills the demo profile's book, never the real one", () => {
+  const env = makeEnv({ sim: true });
+  warmup(env);
+  assert.deepEqual(env.kit.store.get("book", {}), {});
+  assert.ok(Object.keys(env.session._state.set.kit.store.get("book", {})).length >= 1);
+});
+
+test("Combo Book stays hidden until the first combo (progressive reveal)", () => {
+  const env = makeEnv();
+  assert.equal(env.seen("book").at(-1)[1].show, false);
+});
+
+test("Add my next session: a weekly .ics at the day and time the person picks, downloaded, nothing sent", () => {
+  const env = makeEnv();
+  warmup(env);
+  const ics = env.session.addReminder({ day: 4, time: "18:30" });
+  assert.equal(env.downloads.length, 1);
+  assert.equal(env.downloads[0].name, "bag-work-session.ics");
+  assert.match(ics, /BEGIN:VCALENDAR/);
+  assert.match(ics, /RRULE:FREQ=WEEKLY;BYDAY=TH/);
+  assert.match(ics, /DTSTART:\d{8}T183000/);
+  assert.match(ics, /SUMMARY:Bag work session/);
+  assert.match(env.seen("recapNote").at(-1)[1], /Thursdays at 18:30/);
+  assert.equal(env.session.addReminder({ day: 9, time: "x" }), null, "a bad time or day downloads nothing");
+  assert.equal(env.downloads.length, 1);
+});
+
+test("Personal bests: top speed per punch type after the gate, stored in m/s and shown in the chosen unit; none from the warm-up", () => {
+  globalThis.BPCore = C;
+  const env = makeEnv();
+  warmup(env);
+  assert.equal(env.kit.pb.best("speed_jab"), null, "no speed best from the warm-up round");
+  assert.equal(env.seen("pbShelf").at(-1)[1].show, false);
+  env.t += 10000;
+  env.startRound({ roundMs: 180000 });
+  const base = env.t;
+  for (const [i, v] of [6.2, 7.5, 6.9].entries()) { env.t = base + 61000 + i * 600; env.throw({ startT: env.t, hand: "L", type: "jab", peakV: v }); }
+  env.throw({ startT: base + 10000, hand: "L", type: "jab", peakV: 11 });                    // inside the first minute: never a best
+  env.endRound({ roundMs: 180000 });
+  assert.equal(env.kit.pb.best("speed_jab"), 7.5, "the best after the gate, in m/s");
+  const shelf = env.seen("pbShelf").at(-1)[1];
+  assert.equal(shelf.show, true);
+  assert.ok(shelf.items.some((x) => x.label === "Jab speed" && x.text === "7.5 m/s"));
+  env.win.__bwBoxing.S.unit = "mph";
+  assert.ok(env.kit.pb.all().find((x) => x.id === "speed_jab").bestText.endsWith("mph"), "the same stored value reads in mph");
+  delete globalThis.BPCore;
+});
+
+test("a session left on the page by the Lab view is not wiped silently: the hero says so first", () => {
+  const env = makeEnv();
+  env.S.rounds.push({ n: 1, startT: 0, endT: 1000 });          // a lab session is on the page, the game has no set for it
+  env.session.onEvent({ type: "device", on: true });
+  env.views.length = 0;
+  env.emit("session.reset");                                    // any refresh
+  env.S.rounds.push({ n: 1, startT: 0, endT: 1000 });
+  env.session.setMode("lab"); env.session.setMode("fight");
+  assert.equal(env.seen("layout").at(-1)[1].hero, true);
+  assert.match(env.seen("hint").at(-1)[1], /export the CSV first/);
+  assert.deepEqual(env.cmds.filter((c) => c.cmd === "reset"), [], "nothing was reset");
 });

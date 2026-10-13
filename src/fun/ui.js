@@ -170,6 +170,45 @@ export function createView() {
     show(el, !!text);
   }
 
+  // ---- the Combo Book
+  const BEST_SHAPE = { free: "dash", count: "square", good: "triangle", great: "circle", perfect: "diamond" };
+  function book({ pages, counts, own, fresh, show: on }) {
+    const card = $("card-book");
+    if (!card) return;
+    show(card, !!on);
+    if (!on) return;
+    const list = $("book-list");
+    list?.replaceChildren(...pages.map((p) => {
+      const li = document.createElement("li"); li.className = "book-page";
+      li.dataset.locked = p.entry ? "0" : "1"; li.dataset.new = fresh?.has(p.str) ? "1" : "0";
+      const nm = document.createElement("span"); nm.className = "nm"; nm.textContent = p.name;
+      const str = document.createElement("span"); str.className = "str"; str.textContent = p.str;
+      const best = document.createElement("span"); best.className = "best";
+      if (p.entry) { best.dataset.glyph = glyph(BEST_SHAPE[p.entry.best]); best.textContent = `${COPY.book.times(p.entry.count)} · ${COPY.book.best[p.entry.best]}`; }
+      else { best.dataset.glyph = glyph("dash"); best.textContent = COPY.book.locked; }
+      li.setAttribute("aria-label", COPY.book.aria(p.name, p.str, p.entry ? best.textContent : COPY.book.locked));
+      li.append(nm, str, best);
+      return li;
+    }));
+    setText($("book-tag"), COPY.book.tag(counts.named, counts.total - 1 + (pages.some((p) => p.hidden) ? 1 : 0)));
+    setText($("book-note"), own > 0 ? COPY.book.own(own) : COPY.book.note);
+  }
+
+  // ---- personal bests (the speed values arrive already formatted for the m/s or mph choice)
+  function pbShelf({ items, show: on }) {
+    const card = $("card-pb");
+    if (!card) return;
+    show(card, !!on);
+    if (!on) return;
+    $("pb-list")?.replaceChildren(...items.map((it) => {
+      const li = document.createElement("li"); li.className = "book-page"; li.dataset.locked = "0";
+      const nm = document.createElement("span"); nm.className = "nm"; nm.textContent = it.label;
+      const v = document.createElement("span"); v.className = "str"; v.textContent = it.text;
+      li.append(nm, v);
+      return li;
+    }));
+  }
+
   // ---- round grade
   function gradeCard(g) {
     const stampEl = $("grade-stamp");
@@ -244,7 +283,20 @@ export function createView() {
     announce(COPY.recap.aria);
     return done;
   }
+  const recapNote = (text) => setText($("recap-note"), text || "");
   const closeRecap = () => { const d = $("fun-recap"); try { if (d?.open) d.close(); } catch { d?.removeAttribute("open"); } };
+
+  // ---- calendar reminder (an .ics the person downloads: the calendar app does the reminding)
+  function reminder({ days, day, onAdd }) {
+    const sel = $("ics-day");
+    if (sel) {
+      sel.replaceChildren(...days.map((name, i) => { const o = document.createElement("option"); o.value = String(i); o.textContent = name; return o; }));
+      sel.value = String(day);
+    }
+    const b = $("ics-add");
+    if (b) b.onclick = () => onAdd?.({ day: Number($("ics-day")?.value), time: $("ics-time")?.value });
+    setText($("ics-summary"), COPY.reminder.summary);
+  }
 
   // ---- settings
   function settings({ prefs, stats, firstWinMs, feedback }) {
@@ -303,7 +355,7 @@ export function createView() {
 
   return {
     bind, announce, renderStatus, setHero, hint, layout, setStage, coach, flow, showCall, digit, ring, endCall, clearCall, stamp, countIt,
-    punchPop, mirrorLast, stageTime, tier, lastNote, gradeCard, recap, closeRecap, settings, mode, lab, setup, forgetLabel,
+    punchPop, mirrorLast, stageTime, tier, lastNote, book, pbShelf, gradeCard, reminder, recap, recapNote, closeRecap, settings, mode, lab, setup, forgetLabel,
     tierNames: SPEED_TIERS.map((t) => t.id),
   };
 }

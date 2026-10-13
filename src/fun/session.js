@@ -2,7 +2,7 @@
 // set of rounds and one round in view, runs the coach's calls, turns a finished round into one kit session (XP, badges, bests) and
 // hands the screens what to draw. The detector, the classifier and the round clock never import this: the page only dispatches
 // events and takes a few commands back, and a fault in here is caught, logged and never stops a round.
-import { createFirstWin, dayKey } from "../vendor/fun-kit/index.js";
+import { createFirstWin, dayKey, buildReminderIcs, downloadIcs } from "../vendor/fun-kit/index.js";
 import * as K from "./kit.js";
 import * as cel from "./celebrate.js";
 import * as prefsStore from "./prefs.js";
@@ -10,6 +10,7 @@ import { createStats } from "./stats.js";
 import { COPY } from "./copy.js";
 import { buildRecapCards, bestMoment } from "./recap.js";
 import { simResponse } from "./sim-driver.js";
+import { bookAdd, bookCounts, bookPages } from "./book.js";
 import {
   XP, WARMUP, FIRST_WIN, SPEED_PB_IDS, CALL, FLOW, JUDGMENTS,
 } from "./config.js";
@@ -24,8 +25,9 @@ const TYPE_FOR_NUM = { 1: "jab", 2: "cross", 3: "hook", 4: "hook", 5: "uppercut"
 const DAY_OPTS = { rolloverHour: 4 };
 const ROUNDS_KEY = "log.rounds";
 const FEEDBACK_KEY = "log.feedback";
+const BOOK_KEY = "book";
 
-export function createSession({ view, win = globalThis.window, now = () => performance.now(), wall = () => Date.now(), kit = K.getKit() } = {}) {
+export function createSession({ view, win = globalThis.window, now = () => performance.now(), wall = () => Date.now(), kit = K.getKit(), download = downloadIcs } = {}) {
   const app = () => win.__bwBoxing;
   const S = () => app().S;
   const core = () => app().core;
@@ -59,7 +61,10 @@ export function createSession({ view, win = globalThis.window, now = () => perfo
   function layout() {
     const s = S(), running = !!s.clock?.running, hasRounds = s.rounds.length > 0;
     const graded = !!st.set?.rounds.length;
-    view.layout({ hero: !hasRounds && !running, stage: running, grade: graded && hasRounds, actions: !running && !!st.set?.done });
+    // a session left on the page by the Lab view (or by Forget my data) is not ours to wipe silently: the hero says so before it starts a new one
+    const orphan = hasRounds && !st.set && !running;
+    view.layout({ hero: (!hasRounds && !running) || orphan, stage: running, grade: graded && hasRounds, actions: !running && !!st.set?.done });
+    if (orphan) view.hint(COPY.hero.sessionOnPage);
   }
   function refreshStatus() {
     try {
@@ -74,7 +79,21 @@ export function createSession({ view, win = globalThis.window, now = () => perfo
   function refreshSettings() {
     view.settings({ prefs, stats: stats.snapshot(), firstWinMs: firstWin.state().timeToWinMs ?? stats.snapshot().firstWinMs, feedback: lastFeedback() });
   }
-  const refreshAll = () => { refreshStatus(); refreshHero(); refreshSettings(); layout(); };
+  /** The Combo Book of the profile in view: it appears after the first combo (progressive reveal), never before. */
+  function refreshBook(fresh = new Set()) {
+    try {
+      const book = viewKit().store.get(BOOK_KEY, {}), counts = bookCounts(book);
+      view.book({ pages: bookPages(book), counts, own: counts.distinct - counts.named, fresh, show: counts.distinct > 0 });
+    } catch (e) { warn("book", e); }
+  }
+  /** Personal bests of the profile in view. Speeds are stored in m/s; the text is made by the kit's format, which reads the m/s or mph choice. */
+  function refreshPb() {
+    try {
+      const items = viewKit().pb.all().filter((x) => x.best != null).map((x) => ({ label: x.label, text: x.bestText }));
+      view.pbShelf({ items, show: items.length > 0 });
+    } catch (e) { warn("bests", e); }
+  }
+  const refreshAll = () => { refreshStatus(); refreshHero(); refreshSettings(); refreshBook(); refreshPb(); layout(); };
   const warn = (what, e) => { try { console.warn(`[bag work] ${what}`, e); } catch { /* none */ } };
 
   // ---------------------------------------------------------------------------------------------- starting
@@ -123,7 +142,7 @@ export function createSession({ view, win = globalThis.window, now = () => perfo
       case "session.reset": return onReset();
       case "sim": return onSim(d.on);
       case "device": hint(null); return refreshHero();
-      case "units": view.mirrorLast(); return refreshHero();
+      case "units": view.mirrorLast(); refreshPb(); return refreshHero();
       case "stance.changed": return undefined;
       case "label.reviewed": return onLabelReviewed(d);
       case "label.bulk": return undefined;                          // "Mark all unreviewed correct" earns 0
@@ -161,7 +180,7 @@ export function createSession({ view, win = globalThis.window, now = () => perfo
 
   function onSim(on) {
     if (on && mode === "fight") { demoKit(); stats.count("sim.used"); }
-    refreshHero(); refreshStatus(); refreshSettings();
+    refreshHero(); refreshStatus(); refreshSettings(); refreshBook(); refreshPb();
   }
   function onReset() {
     stopTicker(); st.round = null; st.set = null;
@@ -377,7 +396,8 @@ export function createSession({ view, win = globalThis.window, now = () => perfo
     const completedFrac = Math.min(1, (endT - startT) / roundMs);
     const finished = !d.stopped && completedFrac >= XP.completeFrac;
     const combos = c.groupCombos(punches, c.DEFAULTS.comboGapMs);
-    const free = combos.filter((x) => x.len >= 2 && x.punches.every((p) => !r.consumed.has(p.n))).length;
+    const freeList = combos.filter((x) => x.len >= 2 && x.punches.every((p) => !r.consumed.has(p.n)));
+    const free = freeList.length;
     const grade = roundGrade({ punches, calls: r.calls, startT, endT, roundMs, warmup: warm, flowPeak: r.flow.peak });
     const roundsToday = roundsOnDay(set.kit.store.get(ROUNDS_KEY, null), day());
     const fullSession = finished && !warm && set.finished + 1 === set.total && d.n === set.total;
@@ -404,6 +424,16 @@ export function createSession({ view, win = globalThis.window, now = () => perfo
         if (r.calls.some((x) => ["good", "great", "perfect"].includes(x.judgment) || (x.judgment === "count" && x.counted))) first.push("called");
         if (r.calls.some((x) => x.judgment === "perfect")) first.push("perfect");
         const metrics = {};
+        // the Combo Book: every combo landed (called as Good or better or counted, or thrown free) gets its page, any judgment
+        const landed = [
+          ...r.calls.filter((x) => ["perfect", "great", "good"].includes(x.judgment) || (x.judgment === "count" && x.counted)).map((x) => ({ str: x.call, judgment: x.judgment })),
+          ...freeList.map((x) => ({ str: x.str, judgment: "free" })),
+        ];
+        const booked = bookAdd(set.kit.store.get(BOOK_KEY, {}), landed);
+        set.kit.store.set(BOOK_KEY, booked.book);
+        bundle.added = booked.added;
+        const counts = bookCounts(booked.book);
+        metrics.bookDistinct = counts.distinct; metrics.bookNamed = counts.named;
         if (!warm) {
           const gated = punches.filter((p) => speedGateOpen({ t: p.startT, setStartT: set.startedAt, warmup: false }));
           for (const [type, id] of Object.entries(SPEED_PB_IDS)) {
@@ -436,7 +466,11 @@ export function createSession({ view, win = globalThis.window, now = () => perfo
     if (warm && finished) stats.count("warmup.done");
     set.rounds.push(bundle);
 
-    const note = xp.fullDay ? COPY.grade.day : grade.fadeBig ? COPY.grade.fade : !punches.length ? COPY.grade.empty : "";
+    const fresh = bundle.added ?? [];
+    const note = [xp.fullDay ? COPY.grade.day : grade.fadeBig ? COPY.grade.fade : !punches.length ? COPY.grade.empty : "", fresh.length ? COPY.book.fresh(fresh.map((a) => a.name ?? a.str).join(", ")) : ""].filter(Boolean).join(" ");
+    if (fresh.some((a) => a.hidden)) cel.readout("alphabet");
+    refreshBook(new Set(fresh.map((a) => a.str)));
+    refreshPb();
     view.gradeCard({ grade: grade.grade, score: grade.score, xp: bundle.xp, strong: grade.strong, warmup: warm, empty: !punches.length, parts: grade.parts, note });
     cel.readout("gradeSlam");
     if (grade.strong) cel.buzz("perfect");
@@ -482,11 +516,23 @@ export function createSession({ view, win = globalThis.window, now = () => perfo
     };
   }
 
+  /** A weekly calendar event the person downloads, at a day and time they pick. The calendar app does the reminding; nothing is sent. */
+  function addReminder({ day, time } = {}) {
+    if (!/^\d{1,2}:\d{2}$/.test(time ?? "") || !(day >= 0 && day <= 6)) { view.recapNote(COPY.reminder.bad); return null; }
+    try {
+      const ics = buildReminderIcs({ title: COPY.reminder.title, description: COPY.reminder.description, time, days: [day], startDate: dayKey(wall(), DAY_OPTS), appName: "bag-work" });
+      download(ics, "bag-work-session.ics", { doc: win.document, urlApi: win.URL });
+      view.recapNote(COPY.reminder.done(COPY.reminder.days[day], time));
+      return ics;
+    } catch (e) { warn("reminder", e); view.recapNote(COPY.reminder.bad); return null; }
+  }
+
   function openRecap(set = st.set) {
     if (!set?.rounds.length || mode !== "fight") return Promise.resolve();
     const { cards, info } = setBundle(set);
     stats.count("recap.opened");
     const warmOnly = set.kind === "warmup";
+    view.reminder({ days: COPY.reminder.days, day: (new Date(wall()).getDay() + 2) % 7, onAdd: addReminder });
     return view.recap({
       cards, xpInfo: info,
       cta: { label: warmOnly ? COPY.recap.ctaCoach(S().settings.rounds, roundText()) : COPY.recap.cta.again },
@@ -590,6 +636,6 @@ export function createSession({ view, win = globalThis.window, now = () => perfo
     return api;
   }
 
-  const api = { start, startWarmup, startCoached, openRecap, setting, setMode, feedback, forget, stats, firstWin, countIt, onEvent, dispose() { stopTicker(); clearTimeout(st.forgetArmed); st.forgetArmed = null; cel.hush(); }, _tick: tick, _state: st };
+  const api = { start, startWarmup, startCoached, openRecap, setting, setMode, feedback, forget, stats, firstWin, countIt, onEvent, addReminder, dispose() { stopTicker(); clearTimeout(st.forgetArmed); st.forgetArmed = null; cel.hush(); }, _tick: tick, _state: st };
   return api;
 }

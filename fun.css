@@ -49,8 +49,8 @@ html[data-mode="fight"]:not([data-setup="open"]) .setup-tool { display: none; }
 @media (max-width: 1100px) {
   .sections { margin-inline: calc(var(--sp-4) * -1); padding-inline: var(--sp-4); }
   /* on a phone the punch you just threw comes before the timer settings */
-  html[data-mode="fight"] #card-last { order: 1; } html[data-mode="fight"] #card-combos { order: 2; } html[data-mode="fight"] #card-count { order: 3; }
-  html[data-mode="fight"] #card-clock { order: 4; } html[data-mode="fight"] .lab-toggle { order: 5; } html[data-mode="fight"] .lab-card { order: 6; }
+  html[data-mode="fight"] #card-last { order: 1; } html[data-mode="fight"] #card-combos { order: 2; } html[data-mode="fight"] #card-book { order: 3; } html[data-mode="fight"] #card-pb { order: 4; } html[data-mode="fight"] #card-count { order: 5; }
+  html[data-mode="fight"] #card-clock { order: 6; } html[data-mode="fight"] .lab-toggle { order: 7; } html[data-mode="fight"] .lab-card { order: 8; }
 }
 html { scroll-padding-top: calc(var(--nav-h) + var(--sp-3)); }
 
@@ -139,6 +139,19 @@ button.sm { padding: var(--sp-1) var(--sp-3); font-size: var(--fs-sm); min-heigh
 #last-type.pop { animation: pop-in var(--dur-pop) var(--ease-spring) both; }
 .combo-str.pop { animation: pop-in var(--dur-pop) var(--ease-spring) both; }
 
+/* ---------------------------------------------------------------- the Combo Book */
+.book { list-style: none; display: grid; grid-template-columns: repeat(auto-fill, minmax(var(--w-kpi), 1fr)); gap: var(--sp-2); margin: 0; padding: 0; }
+.book-page { display: grid; gap: var(--sp-hair); padding: var(--sp-2) var(--sp-3); border: var(--bw) solid var(--line); border-radius: var(--r-md); background: var(--panel-2); }
+.book-page .nm { font-weight: var(--fw-semi); font-size: var(--fs-base); }
+.book-page .str { font-variant-numeric: tabular-nums; letter-spacing: var(--ls-badge); font-weight: var(--fw-black); color: var(--teal-text); }
+.book-page .best { color: var(--muted); font-size: var(--fs-sm); }
+.book-page .best::before { content: attr(data-glyph) " "; }
+.book-page[data-locked="1"] { border-style: dashed; background: transparent; }
+.book-page[data-locked="1"] .str, .book-page[data-locked="1"] .nm { color: var(--muted); }
+.book-page[data-new="1"] { border-color: var(--teal); }
+
+.pb-list .book-page .str { color: var(--text); letter-spacing: 0; }
+
 /* ---------------------------------------------------------------- lab details toggle, settings */
 .lab-toggle { grid-column: span 12; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--sp-3); padding: var(--sp-3) var(--sp-4); border: var(--bw) dashed var(--line); border-radius: var(--r-lg); }
 .lab-toggle h2 { margin: 0; font-size: var(--fs-sm); letter-spacing: var(--ls-caps); text-transform: uppercase; color: var(--muted); font-weight: var(--fw-semi); display: flex; gap: var(--sp-2); flex-wrap: wrap; }
@@ -169,6 +182,12 @@ button.sm { padding: var(--sp-1) var(--sp-3); font-size: var(--fs-sm); min-heigh
 .feedback .seg button { min-height: var(--nav-h); }
 .feedback .seg button.on { background: var(--teal); color: var(--ink-teal); }
 .recap-cta { margin-top: var(--sp-3); gap: var(--sp-2); }
+.reminder { margin-top: var(--sp-3); border: var(--bw) dashed var(--line); border-radius: var(--r-md); padding: var(--sp-2) var(--sp-3); }
+.reminder summary { cursor: pointer; font-weight: var(--fw-semi); font-size: var(--fs-base); min-height: var(--nav-h); display: flex; align-items: center; }
+.reminder summary:focus-visible { outline: var(--bw-2) solid var(--teal); outline-offset: var(--bw); }
+.reminder .row { align-items: flex-end; margin-top: var(--sp-2); }
+.reminder label { display: grid; gap: var(--sp-1); color: var(--muted); font-size: var(--fs-xs); text-transform: uppercase; letter-spacing: var(--ls-kv); }
+.reminder select, .reminder input[type="time"] { background: var(--navy-2); color: var(--text); border: var(--bw) solid var(--line); border-radius: var(--r-sm); padding: var(--sp-1) var(--sp-2); font: inherit; font-size: var(--fs-base); min-height: var(--nav-h); }
 
 /* ---------------------------------------------------------------- phone width */
 @media (max-width: 480px) {
@@ -182,6 +201,7 @@ button.sm { padding: var(--sp-1) var(--sp-3); font-size: var(--fs-sm); min-heigh
 /* ---------------------------------------------------------------- desktop: the four live cards sit two by two */
 @media (min-width: 1101px) {
   html[data-mode="fight"] #card-clock, html[data-mode="fight"] #card-last, html[data-mode="fight"] #card-count, html[data-mode="fight"] #card-combos { grid-column: span 6; }
+  html[data-mode="fight"] #card-book, html[data-mode="fight"] #card-pb { grid-column: span 12; }
 }
 
 /* ---------------------------------------------------------------- reduced motion: the device setting, or Settings > Motion (which wins either way) */

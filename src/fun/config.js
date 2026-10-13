@@ -111,7 +111,7 @@ export const FEATURES = Object.freeze({
 });
 
 /**
- * Starter badges (the design's 1 to 8). None is about punching harder, volume or agreeing with a label. The flags a round
+ * Starter badges (the design's 1 to 8, plus the two Combo Book ones). None is about punching harder, volume or agreeing with a label. The flags a round
  * passes as `first` are: punch, combo, warmup, round, session, called, perfect.
  */
 export const BADGES = Object.freeze([
@@ -123,6 +123,8 @@ export const BADGES = Object.freeze([
   { id: "called_it", title: "Called It", desc: "Land a coach call as Good or better.", tier: "common", xp: 10, icon: "target", rule: { firstTime: "called" } },
   { id: "perfect_timing", title: "Perfect Timing", desc: "Land a coach call as Perfect.", tier: "uncommon", xp: 20, icon: "star", rule: { firstTime: "perfect" } },
   { id: "flow_3", title: "Finding Flow", desc: "Reach Flow x3 in a round.", tier: "common", xp: 10, icon: "flame", rule: { threshold: "flow", gte: 3 } },
+  { id: "book_5", title: "Combo Book: 5", desc: "Land five different combos.", tier: "common", xp: 10, icon: "star", rule: { threshold: "bookDistinct", gte: 5 } },
+  { id: "book_12", title: "Combo Book: 12", desc: "Fill every page of the Combo Book.", tier: "rare", xp: 40, icon: "trophy", rule: { threshold: "bookNamed", gte: 12 } },
 ]);
 
 /** Personal bests: top hand speed per punch type (after the warm-up gate), best Round Grade, best Flow, longest chain. Speeds are stored in m/s. */
@@ -171,6 +173,7 @@ export const SOUND_PLANS = Object.freeze({
   stampCount: [{ f: 880, dur: 0.06, gain: 0.18, type: "square" }],
   stampMiss: [{ f: 196, dur: 0.3, gain: 0.2 }],
   gradeSlam: [{ f: 92, f2: 44, dur: 0.26, gain: 0.55 }, { f: 523.25, at: 0.05, dur: 0.22, gain: 0.18 }],
+  alphabet: [261.63, 293.66, 329.63, 392, 440, 523.25].map((f, i) => ({ f, at: i * 0.09, dur: 0.22, gain: 0.22, type: "triangle" })),   // a tiny piano run for the hidden Alphabet entry
 });
 export const HIT_SOUND = Object.freeze({ jab: "thudJab", cross: "thudCross", hook: "thudHook", uppercut: "thudUpper" });
 export const JUDGMENT_SOUND = Object.freeze({ perfect: "stampPerfect", great: "stampGreat", good: "stampGood", count: "stampCount", missed: "stampMiss" });
@@ -190,3 +193,16 @@ export const HAPTIC_VOCABULARY = Object.freeze({ landed: "single soft pulse", pe
 
 /** Words that never appear in app copy: this is bag and pad work, and force is not measured. */
 export const NEVER_WORDS = Object.freeze(["damage", "knockout", "knock out", "power", "force", "harder", "opponent", "kill", "violence", "revenge"]);
+
+// ---- Combo Book (P2) ----------------------------------------------------------------------------------------------
+
+/** The named combos of the Combo Book, in boxing numbers. The last is hidden until you throw it. */
+export const BOOK_NAMED = Object.freeze([
+  Object.freeze({ str: "1", name: "Single" }), Object.freeze({ str: "1-2", name: "One-Two" }), Object.freeze({ str: "1-1", name: "Doublet" }),
+  Object.freeze({ str: "1-1-2", name: "Triple" }), Object.freeze({ str: "1-2-1", name: "Jab-Cross-Jab" }), Object.freeze({ str: "1-2-3", name: "Classic" }),
+  Object.freeze({ str: "1-2-3-2", name: "Four Count" }), Object.freeze({ str: "1-2-5-2", name: "Up and Over" }), Object.freeze({ str: "1-6-3-2", name: "Corkscrew" }),
+  Object.freeze({ str: "3", name: "Left Hook Special" }), Object.freeze({ str: "4", name: "Rear Hook Special" }),
+  Object.freeze({ str: "1-2-3-4-5-6", name: "Alphabet", hidden: true }),
+]);
+/** Best way a combo was landed, lowest first: free work, then the call judgments. */
+export const BOOK_RANK = Object.freeze(["free", "count", "good", "great", "perfect"]);

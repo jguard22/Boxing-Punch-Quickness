@@ -32,7 +32,7 @@ test("one createFunKit config: playful mode, weekly sessions ring, the 200 XP da
   assert.equal(kit.streaks.rules.unit, "sessions");
   assert.equal(kit.xp.info().need, xpForNextLevel(1, CURVE), "the level curve is the kit's, from the config");
   assert.equal(KIT_CONFIG.app, APP);
-  assert.equal(BADGES.length, 8);
+  assert.equal(BADGES.length, 10, "the eight starter badges plus the two Combo Book ones");
   assert.equal(TITLES.length, 12);
   for (const d of DROPS) assert.equal(d.kind, "message", "surprises are kind notes, never tied to a measurement");
 });
@@ -320,7 +320,9 @@ test("the page stays usable without the fun layer: ?fun=0 and ?mode=lab show the
   assert.match(css, /html\[data-fun="off"\] \.fun-only/);
   assert.match(css, /html\[data-mode="lab"\] \.fun-only/);
   assert.match(read("src/fun/boot.js"), /get\("fun"\) === "0"/);
-  assert.doesNotMatch(read("src/fun/boot.js"), /^import\s/m, "boot.js imports nothing statically, so ?fun=0 fetches nothing");
+  assert.doesNotMatch(read("src/fun/boot.js"), /^\s*(import|export)\s/m, "boot.js is a plain script with only a dynamic import, so ?fun=0 fetches nothing and a browser without module support still falls back");
+  assert.match(read("src/fun/boot.js"), /dataset\.fun = "off"/, "if the layer cannot start, the page becomes the original page");
+  assert.match(read("index.html"), /<script src="src\/fun\/boot\.js"><\/script>/);
   for (const id of ["btn-left", "btn-right", "btn-insoles", "btn-stance", "btn-sim", "btn-export", "btn-export-rounds", "btn-reset", "units-seg", "summary-card", "round-wrap", "fx-wrap", "cm-wrap", "punch-table", "log"]) assert.match(html, new RegExp(`id="${id}"`), `${id} is still on the page`);
 });
 

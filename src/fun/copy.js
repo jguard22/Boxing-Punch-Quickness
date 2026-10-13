@@ -18,6 +18,7 @@ export const COPY = {
     sim: "Simulate (no sensors)",
     simOn: "Simulating. Tap to stop",
     noSensor: "No wrist sensor is connected yet. Connect one under Setup, or try it with Simulate.",
+    sessionOnPage: "A session is still on this page. Starting a new one clears it, so export the CSV first if you want to keep the punches.",
     backTitle: "Ready for a round?",
     backSub: "Coach calls change every round. Throw what you hear.",
     coach: (rounds, roundText) => `Start Coach Calls: ${rounds} ${plural(rounds, "round")} of ${roundText}`,
@@ -147,6 +148,31 @@ export const COPY = {
   },
 
   labelLab: { xp: "Label reviewed" },
+
+  pbShelf: { title: "Personal bests", empty: "Bests count after your first minute of a session, never in the warm-up round." },
+
+  book: {
+    title: "Combo Book",
+    tag: (n, total) => `${n} of ${total}`,
+    note: "Land a combo, called or free, and its page fills in.",
+    own: (n) => `${n} more of your own ${plural(n, "combo")} logged.`,
+    locked: "Not yet",
+    times: (n) => `x${n}`,
+    best: { free: "Free work", count: "Counted", good: "Good", great: "Great", perfect: "Perfect" },
+    fresh: (names) => `New in your Combo Book: ${names}.`,
+    aria: (name, str, state) => `${name}, ${str}. ${state}`,
+  },
+
+  reminder: {
+    summary: "Add my next session to my calendar",
+    day: "Day", time: "Time", add: "Download calendar file",
+    title: "Bag work session",
+    description: "A round or three on the bag. Wrap your hands and warm up first.",
+    days: ["Sundays", "Mondays", "Tuesdays", "Wednesdays", "Thursdays", "Fridays", "Saturdays"],
+    note: "Your calendar app does the reminding. Nothing is sent from here.",
+    done: (day, time) => `Calendar file saved: ${day} at ${time}.`,
+    bad: "Pick a time first.",
+  },
 
   feedback: {
     ask: "How was that?",
