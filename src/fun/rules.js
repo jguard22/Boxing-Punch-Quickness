@@ -4,7 +4,7 @@
 
 import {
   SPEED_TIERS, GRADES, GRADE_POINTS, RHYTHM_GAP_MS, FINISH_MIN_PUNCHES, STRONG_FINISH_RATIO, FADE_STOP_PCT, BALANCE_BAND, XP,
-  JUDGMENTS, WARM_GATE_MS, HAPTIC_QUIET_MS, CALL, FLOW,
+  JUDGMENTS, WARM_GATE_MS, HAPTIC_QUIET_MS, CALL, FLOW, CALLED_FLOOR,
 } from "./config.js";
 
 export const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
@@ -122,7 +122,9 @@ export function strongFinish(punches, { endT, roundMs, warmup = false }) {
 /**
  * Round Grade, 0 to 100. Called mode: calls 40, rhythm 35, finish 10, hands 15. Free mode swaps the calls for pace control.
  * Flow lifts the calls part (5 percent per Flow step above x1, capped at the 40 points). The finish part is only 10 points and a
- * round without enough punches gets the middle of it, so a fading round is not punished for not pushing.
+ * round without enough punches gets the middle of it, so a fading round is not punished for not pushing. In a called round the
+ * rhythm, finish and hands parts are scaled by how the calls went (half of them with no call answered, all of them with every call
+ * perfect), so a round that ignores the coach tops out at 30 and grades Warm-up, never Solid.
  * @param {{punches:object[], calls?:Array<{judgment:string}>, startT:number, endT:number, roundMs:number, warmup?:boolean, flowPeak?:number}} o
  */
 export function roundGrade({ punches, calls = [], startT, endT, roundMs, warmup = false, flowPeak = 1 }) {
@@ -133,11 +135,13 @@ export function roundGrade({ punches, calls = [], startT, endT, roundMs, warmup 
   const callsPts = mode === "called" ? GRADE_POINTS.called * clamp(weight * lift, 0, 1) : 0;
   const pace = mode === "free" ? paceShare(ps, startT, endT) : null;
   const pacePts = mode === "free" ? GRADE_POINTS.pace * (pace ?? 0) : 0;
+  // in a called round the other three parts only count in proportion to how the calls went: throwing a steady 1-2 and ignoring the coach is not a good round
+  const keep = mode === "called" ? CALLED_FLOOR + (1 - CALLED_FLOOR) * clamp(weight * lift, 0, 1) : 1;
   const rs = rhythmShare(ps);
-  const rhythmPts = GRADE_POINTS.rhythm * (rs ?? 0);
+  const rhythmPts = GRADE_POINTS.rhythm * (rs ?? 0) * keep;
   const ratio = finishRatio(ps, endT, Math.min(30000, roundMs / 3));
-  const finishPts = GRADE_POINTS.finish * (ratio == null ? 0.5 : clamp(ratio / STRONG_FINISH_RATIO, 0, 1));
-  const handsPts = GRADE_POINTS.balance * balanceScore(ps);
+  const finishPts = GRADE_POINTS.finish * (ratio == null ? 0.5 : clamp(ratio / STRONG_FINISH_RATIO, 0, 1)) * keep;
+  const handsPts = GRADE_POINTS.balance * balanceScore(ps) * keep;
   const parts = { calls: callsPts, pace: pacePts, rhythm: rhythmPts, finish: finishPts, hands: handsPts };
   const score = ps.length ? Math.round(clamp(callsPts + pacePts + rhythmPts + finishPts + handsPts, 0, 100)) : 0;
   const band = gradeFor(score, warmup);
@@ -156,13 +160,17 @@ export function roundGrade({ punches, calls = [], startT, endT, roundMs, warmup 
  * XP for one round. Calls, free combos, finishing the clock and a Strong Finish earn it; punches do not, so volume is never
  * the way to more. Caps: five free combos and fifteen called combos a round, five counted combos a round (a counted combo pays
  * the same flat 3 as a Good, whatever the label did), and twelve rounds a day, after which a round pays 1 XP.
+ * A round shorter than XP.minRoundMs (a minute) pays no round, Strong Finish or full-session bonus and its free-combo cap shrinks in
+ * proportion, so a 6-second round is not a way to farm them; the warm-up (always 30 seconds) is exempt.
  * @param {{warmup?:boolean, completedFrac:number, punches:number, freeCombos:number, calls?:Array<{judgment:string, counted?:boolean}>,
- *   strongFinish?:boolean, fullSession?:boolean, roundsToday?:number}} o roundsToday: rounds already paid today
+ *   strongFinish?:boolean, fullSession?:boolean, roundsToday?:number, roundMs?:number}} o roundsToday: rounds already paid today; roundMs: the round's length (omitted = a full round)
  */
-export function roundXp({ warmup = false, completedFrac, punches, freeCombos, calls = [], strongFinish: strong = false, fullSession = false, roundsToday = 0 }) {
+export function roundXp({ warmup = false, completedFrac, punches, freeCombos, calls = [], strongFinish: strong = false, fullSession = false, roundsToday = 0, roundMs = Infinity }) {
   const parts = { free: 0, called: 0, round: 0, strong: 0, session: 0 };
   if (roundsToday >= XP.roundsPerDay) return { total: XP.afterRounds, parts, fullDay: true, countedPaid: 0, calledPaid: 0 };
-  parts.free = XP.freeCombo * clamp(Math.floor(freeCombos || 0), 0, XP.freeComboMax);
+  const long = warmup || roundMs >= XP.minRoundMs;
+  const freeCap = warmup ? XP.freeComboMax : Math.floor(XP.freeComboMax * clamp(roundMs / XP.minRoundMs, 0, 1));
+  parts.free = XP.freeCombo * clamp(Math.floor(freeCombos || 0), 0, freeCap);
   let calledPaid = 0, countedPaid = 0;
   for (const c of calls) {
     if (calledPaid >= XP.calledMax) break;
@@ -172,11 +180,11 @@ export function roundXp({ warmup = false, completedFrac, punches, freeCombos, ca
     } else if (XP.called[c.judgment]) { calledPaid++; parts.called += XP.called[c.judgment]; }
   }
   const finished = completedFrac >= XP.completeFrac && punches >= XP.minPunches;
-  if (finished) parts.round = warmup ? XP.warmup : XP.round;
-  if (finished && strong && !warmup) parts.strong = XP.strongFinish;
-  if (finished && fullSession && !warmup) parts.session = XP.session;
+  if (finished && long) parts.round = warmup ? XP.warmup : XP.round;
+  if (finished && long && strong && !warmup) parts.strong = XP.strongFinish;
+  if (finished && long && fullSession && !warmup) parts.session = XP.session;
   const total = parts.free + parts.called + parts.round + parts.strong + parts.session;
-  return { total, parts, fullDay: false, countedPaid, calledPaid };
+  return { total, parts, fullDay: false, countedPaid, calledPaid, short: !warmup && roundMs < XP.minRoundMs };
 }
 
 // ---------------------------------------------------------------------------------------------------- Label Lab

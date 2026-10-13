@@ -6,8 +6,12 @@
 export const APP = "boxing-demo";
 export const APP_NAME = "Bag Work";
 
-/** Gentle level curve (a kit curve). Cumulative XP always comes from the kit's xpToReach(), never from literals. */
-export const CURVE = Object.freeze({ first: 30, linear: 8, quad: 4.5, round: 1 });
+/**
+ * Level curve (a kit curve). Cumulative XP always comes from the kit's xpToReach(), never from literals. Level 2 costs 30 XP, which the first
+ * warm-up pays; after that each level costs about twice what the first draft asked, so the whole call ladder (Level 8) takes about two weeks
+ * of three sessions a week instead of three sittings.
+ */
+export const CURVE = Object.freeze({ first: 30, linear: 20, quad: 8, round: 5 });
 
 /** Twelve level titles. None of them is about power or force. */
 export const TITLES = Object.freeze([
@@ -27,9 +31,10 @@ export const XP = Object.freeze({
   called: Object.freeze({ good: 3, great: 5, perfect: 8, count: 3 }), calledMax: 15, countItMax: 5,
   round: 15, warmup: 10,                               // a round that ran 90 percent of its clock; the warm-up round pays 10
   strongFinish: 10, session: 25,                       // session: every planned round finished
-  minPunches: 5,                                       // a round with fewer punches than this pays no round bonus (standing still earns nothing)
+  minPunches: 5,                                       // a round with fewer punches than this pays no round bonus (standing still earns nothing), and a warm-up with fewer is not the first win
   completeFrac: 0.9,
-  welcome: 40,                                         // one time, on the real profile, when the warm-up round ends the first time
+  minRoundMs: 60000,                                   // a round shorter than this pays no round, Strong Finish or full-session bonus, ticks no weekly ring, and its free-combo cap shrinks in proportion (the warm-up is exempt)
+  welcome: 15,                                         // one time, on the real profile, when the warm-up round ends the first time: the first warm-up lands on Level 2, not 3
   dayCap: 200, roundsPerDay: 12, afterRounds: 1,       // 12 rounds a day; after that each round earns 1 XP
   label: 1, labelMax: 20,                              // Label Lab: a punch you reviewed pays a flat 1, 20 a session, never for "Mark all", never for Simulate
 });
@@ -57,6 +62,8 @@ export const GRADES = Object.freeze([
 
 /** Round Grade points. Called mode: calls 40, rhythm 35, finish 10, hands 15. Free mode swaps the calls for pace control. */
 export const GRADE_POINTS = Object.freeze({ called: 40, pace: 40, rhythm: 35, finish: 10, balance: 15 });
+/** In a called round the rhythm, finish and hands points scale from this share (no call answered) up to all of them (every call perfect), so ignoring the coach cannot score Solid. */
+export const CALLED_FLOOR = 0.5;
 export const RHYTHM_GAP_MS = 450;
 export const FINISH_MIN_PUNCHES = 8;
 export const STRONG_FINISH_RATIO = 0.95;
@@ -150,10 +157,11 @@ export const DROPS = Object.freeze([
 
 /** The first-win script: three beats, each completed by an event the fun layer emits. The last one is the win. */
 export const FIRST_WIN = Object.freeze({
+  // text / hint name a line in COPY.coachMarks: what the coach says when the beat lands, and what it says if the beat is slow
   beats: Object.freeze([
-    Object.freeze({ id: "punch", on: "punch" }),
-    Object.freeze({ id: "combo", on: "combo" }),
-    Object.freeze({ id: "warmup", on: "warmup.done" }),
+    Object.freeze({ id: "punch", on: "punch", text: "punch", hint: "nudgePunch" }),
+    Object.freeze({ id: "combo", on: "combo", text: "combo", hint: "nudgeCombo" }),
+    Object.freeze({ id: "warmup", on: "warmup.done", text: "won", hint: "nudgeKeep" }),
   ]),
   winEvent: "warmup.done", nudgeAfterMs: 10000, assistAfterMs: 25000,
 });

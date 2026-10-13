@@ -13,7 +13,7 @@ const EPOCH = 1_760_000_000_000;
 const envs = [];
 afterEach(() => { while (envs.length) envs.pop().session.dispose(); });
 
-function makeEnv({ sim = false, wrists = { L: true, R: false }, rounds = 3 } = {}) {
+function makeEnv({ sim = false, wrists = { L: true, R: false }, rounds = 3, kitStorage = null } = {}) {
   const env = { t: 1000, phase: "idle", n: 0, cmds: [], views: [], sim };
   const S = { punches: [], rounds: [], sim, wrists, unit: "ms", settings: { roundMin: 3, restMin: 1, rounds }, preset: null, clock: null };
   S.clock = { get running() { return env.phase === "round" || env.phase === "rest"; }, cfg: { rounds, roundMs: env.roundMs ?? 180000 }, phaseAt: () => ({ phase: env.phase, n: env.n, remainingMs: 5000, elapsedMs: 0, phaseMs: 0 }) };
@@ -23,10 +23,11 @@ function makeEnv({ sim = false, wrists = { L: true, R: false }, rounds = 3 } = {
     CustomEvent: class { constructor(type, init) { this.type = type; this.detail = init?.detail; } },
     dispatchEvent(e) { env.cmds.push(e.detail); return true; },
     addEventListener() {}, matchMedia: () => ({ matches: false, addEventListener() {} }),
-    document: { documentElement: { dataset: { mode: "fight" } }, getElementById: () => null },
+    document: { documentElement: { dataset: { mode: "fight" } }, getElementById: (id) => (id === "btn-export" ? env.exportBtn : null) },
   };
+  env.exportBtn = { addEventListener(type, fn) { if (type === "click") env.exportClick = fn; } };
   env.view = new Proxy({}, { get: (_, name) => (...args) => { env.views.push([name, ...args]); } });
-  env.kit = makeKit({ storage: createMemoryStorage() });
+  env.kit = makeKit({ storage: kitStorage ?? createMemoryStorage() });
   env.downloads = [];
   env.session = createSession({ view: env.view, win: env.win, now: () => env.t, wall: () => EPOCH + env.t, kit: env.kit, download: (ics, name) => env.downloads.push({ ics, name }) });
   env.session.start();
@@ -146,24 +147,26 @@ test("a coach call: opened on schedule, answered, judged Perfect, Flow moves, XP
   assert.equal(bundle.calls[0].judgment, "perfect");
 });
 
-test("Count it: counts the combo for a flat +3, and corrects the labels only outside Simulate", () => {
+test("Count it: counts the combo for a flat +3 and never touches a label, in or out of Simulate", () => {
   for (const sim of [false, true]) {
     const env = makeEnv({ sim });
     env.startRound({ roundMs: 180000 });
-    env.session._state.round.schedule = [{ atMs: 0, call: "1" }];
+    env.session._state.round.schedule = [{ atMs: 0, call: "2" }];
     env.session._tick();
-    assert.equal(env.session._state.round.call.str, "1");
-    const p = env.throw({ startT: env.t + 600, hand: "L", type: "hook", trueType: sim ? "jab" : null });
+    assert.equal(env.session._state.round.call.str, "2");
+    // a hook thrown for call "2": the hand is right, the sensor read another type
+    const p = env.throw({ startT: env.t + 600, hand: "R", type: "hook", trueType: sim ? "hook" : null });
     env.t = p.t + 700;
     env.session._tick();
     const entry = env.session._state.round.calls[0];
     assert.equal(entry.judgment, "count");
-    assert.equal(entry.read, "3");
+    assert.equal(entry.read, "4");
     assert.equal(env.seen("countIt").at(-1)[1], true, "the Count it panel is on screen");
+    const before = p.trueType;
     env.session.countIt();
     assert.equal(entry.counted, true);
-    assert.equal(p.trueType, sim ? "jab" : "jab", sim ? "the simulator's own truth is never overwritten" : "the corrected label is what was called");
-    assert.equal(env.cmds.some((c) => c.cmd === "refresh"), !sim, "the page redraws its tables only when labels changed");
+    assert.equal(p.trueType, before, "the label is exactly what it was: a tap that pays XP never rewrites one");
+    assert.equal(env.cmds.some((c) => c.cmd === "refresh" || c.cmd === "log"), false, "the page's tables and log are untouched");
     assert.equal(env.session.stats.snapshot().counts["countit.tap"], 1);
     env.endRound({ roundMs: 180000 });
     const b = env.session._state.set.rounds[0];
@@ -455,4 +458,299 @@ test("the grade card shows the part that applies: pace in free work and the warm
   for (let i = 0; i < 9; i++) { env2.t += 400; env2.throw({ startT: env2.t, hand: i % 2 ? "R" : "L", type: i % 2 ? "cross" : "jab" }); }
   env2.endRound({ roundMs: 180000 });
   assert.deepEqual(Object.keys(env2.seen("gradeCard").at(-1)[1].parts), ["calls", "rhythm", "finish", "hands"]);
+});
+
+// ---- the review fixes: a stranded round, a first win with nothing thrown, one tap that wipes labels, tiny rounds, and the small ones
+
+/** A chain of `n` alternating punches from `t`, one every 470 ms, in the round now running. */
+function chain(env, n, { t = env.t + 600, peak = (i) => 6 + (i % 3) * 0.5 } = {}) {
+  for (let i = 0; i < n; i++) { env.t = t; env.throw({ startT: t, hand: i % 2 ? "R" : "L", type: i % 2 ? "cross" : "jab", peakV: peak(i) }); t += 470; }
+}
+
+test("a bell with nothing thrown is not the first win: no win, no spent Welcome Bonus, and the warm-up stays on offer", () => {
+  const env = makeEnv();
+  env.startRound({ preset: "warmup", roundMs: 30000, total: 1 });
+  env.endRound({ preset: "warmup", roundMs: 30000 });
+  assert.equal(env.session.firstWin.isDone(), false, "30 quiet seconds are not a win");
+  const snap = env.session.stats.snapshot();
+  assert.equal(snap.counts["first.win"] ?? 0, 0);
+  assert.equal(snap.firstWinMs, null);
+  const g = env.seen("gradeCard").at(-1)[1];
+  assert.equal(g.empty, true);
+  assert.equal(g.ribbon, undefined, "no first-win ribbon on an empty round");
+  assert.equal(env.seen("coach").at(-1)[1], "No punches were read. Check your sensor, or tap Simulate to see how it works.");
+  assert.equal(env.seen("againLabel").at(-1)[1], "Warm-up again", "the card offers the warm-up again, not coach calls");
+  assert.equal(env.seen("recap").length, 0, "nothing was read, so no recap sheet");
+  // a real warm-up afterwards still gets the win and the Welcome Bonus
+  env.emit("session.reset"); env.S.punches.length = 0; env.S.rounds.length = 0; env.t += 60000;
+  warmup(env);
+  assert.equal(env.session.firstWin.isDone(), true);
+  assert.ok(env.kit.xp.ledger(30).some((r) => r.source === "welcome" && r.amount === XP.welcome), "the Welcome Bonus was still there to pay");
+  assert.equal(env.seen("gradeCard").at(-1)[1].ribbon.startsWith("First win in "), true);
+  assert.equal(env.seen("againLabel").at(-1)[1], "Play again");
+});
+
+test("a warm-up with fewer punches than a round needs (a Simulate switched off early) is not the win either; five punches are", () => {
+  const few = makeEnv();
+  few.startRound({ preset: "warmup", roundMs: 30000, total: 1 });
+  chain(few, XP.minPunches - 1);
+  few.endRound({ preset: "warmup", roundMs: 30000 });
+  assert.equal(few.session.firstWin.isDone(), false);
+  assert.match(few.seen("gradeCard").at(-1)[1].note, /A few punches were read/);
+  assert.match(few.seen("coach").at(-1)[1], /Only 4 punches read/);
+  const enough = makeEnv();
+  enough.startRound({ preset: "warmup", roundMs: 30000, total: 1 });
+  chain(enough, XP.minPunches);
+  enough.endRound({ preset: "warmup", roundMs: 30000 });
+  assert.equal(enough.session.firstWin.isDone(), true);
+});
+
+test("the first warm-up lands on Level 2 on the real profile, never on 3, with the most it can pay", () => {
+  const env = makeEnv();
+  warmup(env, { n: 30 });
+  const info = env.kit.xp.info();
+  assert.equal(info.level, 2, `${env.kit.xp.total} XP`);
+  assert.ok(env.kit.xp.total < xpToReach(3, CURVE));
+});
+
+test("the coach never says 'two punches in a row' after the combo has formed: the third beat has its own nudge", () => {
+  const env = makeEnv();
+  env.startRound({ preset: "warmup", roundMs: 30000, total: 1 });
+  chain(env, 4);
+  const beat = env.session.firstWin.state().beat;
+  assert.equal(beat.id, "warmup");
+  assert.equal(beat.hint, "Keep it easy until the bell.");
+  assert.doesNotMatch(beat.hint, /two punches/i);
+  const ticks = env.session.firstWin.state();
+  assert.equal(ticks.active, true);
+});
+
+test("the coach line is cleared at the bell and says what happened after Stop: a stale cue never outlives its round", () => {
+  const env = makeEnv();
+  env.startRound({ roundMs: 180000, total: 3 });
+  chain(env, 8);
+  env.t = env.roundStart + 20000; env.phase = "stopped";
+  env.emit("round.ended", { n: 1, t: env.t, stopped: true, summary: null, roundMs: 180000, total: 3, preset: null });
+  assert.equal(env.seen("coach").at(-1)[1], "", "the line is empty after the round ends");
+  env.emit("session.stopped", { preset: null });
+  assert.equal(env.seen("coach").at(-1)[1], "Stopped. What you threw is graded.");
+});
+
+test("rounds under a minute pay no round, Strong Finish or session bonus, tick no weekly ring and say so; a one-minute round does", () => {
+  const tiny = makeEnv();
+  tiny.startRound({ roundMs: 6000, total: 1 });
+  chain(tiny, 10, { t: tiny.t + 100 });
+  tiny.endRound({ roundMs: 6000 });
+  const b = tiny.session._state.set.rounds[0];
+  const applied = b.outcome.xp.applied;
+  assert.ok(!applied.some((a) => a.source === "session" && a.amount > 0), "no session XP for a 6-second round");
+  const week = (e) => e.kit.streaks.state(EPOCH + e.t).thisWeek.count;
+  assert.equal(week(tiny), 0, "the weekly ring does not tick");
+  const have = tiny.kit.summary().badges.items.filter((x) => x.unlocked).map((x) => x.id);
+  assert.ok(!have.includes("first_round") && !have.includes("session_done"), "no round badge for a drill");
+  assert.match(tiny.seen("gradeCard").at(-1)[1].note, /Rounds under a minute pay no round bonus\./);
+  const full = makeEnv();
+  full.startRound({ roundMs: XP.minRoundMs, total: 1 });
+  chain(full, 12, { t: full.t + 100 });
+  full.endRound({ roundMs: XP.minRoundMs });
+  assert.ok(full.session._state.set.rounds[0].outcome.xp.applied.some((a) => a.source === "session" && a.amount >= XP.round));
+  assert.equal(week(full), 1, "a one-minute round ticks the ring");
+});
+
+test("the 200 XP soft cap says so on the grade card, in words, when it shrinks a reward", () => {
+  const env = makeEnv();
+  env.kit.xp.award({ amount: 260, source: "test", label: "fill the day" }, { at: EPOCH + 1000 });
+  env.startRound({ roundMs: 180000, total: 1 });
+  chain(env, 14);
+  env.endRound({ roundMs: 180000 });
+  const g = env.seen("gradeCard").at(-1)[1];
+  assert.match(g.note, /Past 200 XP in a day, rounds pay a quarter\./);
+  const fresh = makeEnv();
+  fresh.startRound({ roundMs: 180000, total: 1 });
+  chain(fresh, 14);
+  fresh.endRound({ roundMs: 180000 });
+  assert.doesNotMatch(fresh.seen("gradeCard").at(-1)[1].note, /Past 200 XP/);
+});
+
+test("a Simulate grade says its XP and level are the demo's, and the level-up modal is told the same", () => {
+  const env = makeEnv({ sim: true });
+  warmup(env);
+  assert.match(env.seen("gradeCard").at(-1)[1].note, /Simulate demo: this XP and level are not saved\./);
+  const real = makeEnv();
+  warmup(real);
+  assert.doesNotMatch(real.seen("gradeCard").at(-1)[1].note, /Simulate demo/);
+});
+
+test("a round that fades by more than a quarter offers to stop, once, and never stops it for you", () => {
+  const env = makeEnv();
+  env.startRound({ roundMs: 180000, total: 3 });
+  env.session._state.round.schedule = [];                             // no call opens in this test, so the coach line is the offer's
+  chain(env, 14, { peak: (i) => 9 - i * 0.3 });                       // 9 m/s down to 5: a fade of about 40 percent
+  env.t = env.roundStart + 80000;                                     // past 40 percent of the round
+  env.session._tick();
+  assert.equal(env.seen("easeOffer").filter((v) => v[1] === true).length, 1);
+  assert.equal(env.seen("coach").at(-1)[1], "Your speed has eased. Stopping here is a fine call.");
+  env.session._tick(); env.session._tick();
+  assert.equal(env.seen("easeOffer").filter((v) => v[1] === true).length, 1, "offered once");
+  assert.equal(env.cmds.some((c) => c.cmd === "stop"), false, "the round carries on until the person stops it");
+  const steady = makeEnv();
+  steady.startRound({ roundMs: 180000, total: 3 });
+  chain(steady, 14, { peak: () => 7 });
+  steady.t = steady.roundStart + 80000; steady.session._tick();
+  assert.equal(steady.seen("easeOffer").some((v) => v[1] === true), false, "no offer for a steady round");
+});
+
+test("starting over from the grade card, the recap or the hero asks twice when it would clear reviewed labels, once otherwise, and not after an export", () => {
+  const env = makeEnv();
+  warmup(env);
+  env.S.punches[0].trueType = "hook";                                 // somebody reviewed a punch
+  env.cmds.length = 0; env.views.length = 0;
+  assert.equal(env.session.again(), false, "the first tap only warns");
+  assert.deepEqual(env.cmds.map((c) => c.cmd), [], "nothing was reset");
+  const warn = env.seen("clearWarn").at(-1);
+  assert.match(warn[1], /Starting over clears \d+ punches and 1 label you reviewed\. Export the CSV first/);
+  assert.equal(warn[2], "Tap again to clear");
+  assert.equal(env.session.again(), true, "the second tap goes ahead");
+  assert.equal(env.cmds[0].cmd, "reset");
+  assert.equal(env.cmds.at(-1).cmd, "rounds");
+  // after an export of exactly this state the clear is safe
+  const env2 = makeEnv();
+  warmup(env2);
+  env2.S.punches[0].trueType = "hook";
+  env2.exportClick();
+  env2.cmds.length = 0;
+  assert.equal(env2.session.again(), true);
+  assert.equal(env2.cmds[0].cmd, "reset", "one tap after the CSV was exported");
+  // a label added after the export is at risk again
+  const env3 = makeEnv();
+  warmup(env3);
+  env3.S.punches[0].trueType = "hook"; env3.exportClick();
+  env3.S.punches[1].trueType = "cross";
+  env3.cmds.length = 0;
+  assert.equal(env3.session.again(), false);
+  // no reviewed label, or only the simulator's own: one tap, as before
+  const plain = makeEnv();
+  warmup(plain);
+  plain.cmds.length = 0;
+  assert.equal(plain.session.again(), true);
+  assert.equal(plain.cmds[0].cmd, "reset");
+  const simmed = makeEnv({ sim: true });
+  warmup(simmed);
+  simmed.S.punches.forEach((p) => { p.sim = true; p.trueType = p.type; });
+  simmed.cmds.length = 0;
+  simmed.session.again();
+  assert.equal(simmed.cmds[0].cmd, "reset", "the generator's truth labels are not somebody's work");
+});
+
+test("the second tap has to come soon: the warning times out, and the next tap warns again", async () => {
+  const env = makeEnv();
+  warmup(env);
+  env.S.punches[0].trueType = "hook";
+  assert.equal(env.session.again(), false);
+  env.session._state.clearArmed && clearTimeout(env.session._state.clearArmed);
+  env.session._state.clearArmed = null;                               // what the six-second timer does
+  assert.equal(env.session.again(), false, "after the timeout it asks again");
+});
+
+test("the view cannot be switched while a set runs (it would strand the round); the screen says why, and idle switching works", () => {
+  const env = makeEnv();
+  env.startRound({ roundMs: 180000, total: 3 });
+  chain(env, 4);
+  env.session.setMode("lab");
+  assert.equal(env.session._state.round !== null, true, "the round is still tracked");
+  assert.equal(env.session.stats !== null, true);
+  assert.match(env.seen("coach").at(-1)[1], /A set is running\. Stop it first, then switch to Lab\./);
+  assert.equal(env.seen("mode").length, 1, "the page's view did not change (only the start-up call)");
+  env.endRound({ roundMs: 180000, last: true });
+  env.session.setMode("lab");
+  assert.equal(env.seen("mode").at(-1)[1], "lab", "idle: the switch goes through");
+  // and the other way: a round started in the Lab view cannot be switched into Fight mid-round
+  env.session.setMode("fight");
+  env.session.setMode("lab");
+  env.emit("session.reset"); env.phase = "round";
+  env.cmds.length = 0;
+  env.session.setMode("fight");
+  assert.match(env.cmds.at(-1).text, /A set is running\. Stop it first, then switch to Fight\./);
+  assert.equal(env.cmds.at(-1).cls, "warn");
+});
+
+test("Forget my data in the middle of a round stops the round first, and the Play area is never left blank", () => {
+  const env = makeEnv();
+  env.startRound({ roundMs: 180000, total: 3 });
+  chain(env, 6);
+  env.session.forget();                                               // arms
+  env.cmds.length = 0;
+  env.session.forget();                                               // forgets
+  assert.equal(env.cmds[0].cmd, "stop", "the round ends through the page's own Stop first");
+  assert.equal(env.session._state.set, null);
+  env.phase = "stopped";                                              // the page's clock has stopped
+  env.emit("session.reset");
+  const lay = env.seen("layout").at(-1)[1];
+  assert.equal(lay.hero, true, "the session left on the page gets the hero and its warning");
+  assert.equal(lay.stage, false);
+});
+
+test("the Play area is never blank: a set the game lost track of (no grade, no round, clock stopped) gets the hero", () => {
+  const env = makeEnv();
+  env.startRound({ roundMs: 180000, total: 3 });
+  env.phase = "stopped";                                              // events were missed; the page's clock is stopped, the set has no graded round
+  env.session.setMode("lab"); env.session.setMode("fight");
+  const lay = env.seen("layout").at(-1)[1];
+  assert.equal(lay.hero || lay.grade || lay.stage, true);
+  assert.equal(lay.hero, true);
+  assert.match(env.seen("hint").at(-1)[1], /export the CSV first/);
+});
+
+test("the teal button is the one that works: Simulate when no sensor is connected, the warm-up once one is", () => {
+  const none = makeEnv({ wrists: { L: false, R: false } });
+  assert.equal(none.seen("setHero").at(-1)[1].ready, false);
+  const some = makeEnv();
+  assert.equal(some.seen("setHero").at(-1)[1].ready, true);
+  none.S.wrists.L = true; none.session.onEvent({ type: "device", on: true });
+  assert.equal(none.seen("setHero").at(-1)[1].ready, true);
+});
+
+test("the timer card's Start Rounds with no sensor says what to do instead of running a silent round; with a sensor it is left alone", () => {
+  const env = makeEnv({ wrists: { L: false, R: false } });
+  let stopped = 0;
+  const e = { stopImmediatePropagation() { stopped++; } };
+  env.cmds.length = 0;
+  env.session.railStart(e);
+  assert.equal(stopped, 1, "the page's own handler never gets the click");
+  assert.deepEqual(env.cmds, []);
+  assert.match(env.seen("hint").at(-1)[1], /No wrist sensor/);
+  assert.ok(env.seen("showHero").length >= 1, "the hero comes into view so the message is where the eyes are");
+  env.S.wrists.L = true;
+  env.session.railStart(e);
+  assert.equal(stopped, 1, "with a sensor connected the click goes through to the page");
+  const sim = makeEnv({ sim: true, wrists: { L: false, R: false } });
+  let s2 = 0;
+  sim.session.railStart({ stopImmediatePropagation() { s2++; } });
+  assert.equal(s2, 0, "Simulate counts as a sensor");
+});
+
+test("Add my next session: the calendar event starts on the chosen weekday, never as a stray event today", () => {
+  const env = makeEnv();
+  warmup(env);
+  const startOf = (ics) => { const m = /DTSTART:(\d{4})(\d{2})(\d{2})T/.exec(ics); return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3])); };
+  const today = new Date(EPOCH + env.t); today.setHours(0, 0, 0, 0);
+  for (let day = 0; day <= 6; day++) {
+    const d = startOf(env.session.addReminder({ day, time: "06:00" }));
+    assert.equal(d.getDay(), day, `weekday ${day}`);
+    const ahead = Math.round((d - today) / 86400000);
+    assert.ok(ahead >= 0 && ahead < 8, `${ahead} days ahead`);
+    if (d.getDay() !== today.getDay()) assert.ok(ahead > 0, "not today unless today is the day");
+  }
+});
+
+test("blocked storage: the real profile runs on memory and the status says it is not kept", () => {
+  const blocked = { getItem() { throw new Error("denied"); }, setItem() { throw new Error("denied"); }, removeItem() { throw new Error("denied"); }, key: () => null, length: 0 };
+  const env = makeEnv({ kitStorage: blocked });
+  assert.equal(env.kit.store.kind, "none");
+  assert.equal(env.seen("renderStatus").at(-1)[1].unsaved, true);
+  assert.match(env.seen("announce").at(-1)[1], /blocks storage/);
+  warmup(env);
+  assert.ok(env.kit.xp.total > 0, "XP still counts for this visit");
+  const ok = makeEnv();
+  assert.equal(ok.seen("renderStatus").at(-1)[1].unsaved, false);
 });

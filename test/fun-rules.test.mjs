@@ -9,20 +9,31 @@ import { punch } from "./fun-helpers.mjs";
 
 // ---- levels and the first minute (through xpToReach, never a literal)
 
-test("the level curve: level 2 inside the first warm-up round, from what the warm-up can pay", () => {
+test("the level curve: the first warm-up lands on level 2 at both ends of what it can pay, never on level 3", () => {
   const badgeXp = (id) => BADGES.find((b) => b.id === id).xp;
-  const warmupMax = XP.freeCombo * XP.freeComboMax + XP.warmup + badgeXp("first_punch") + badgeXp("first_combo") + badgeXp("warmup_done");
-  assert.ok(warmupMax >= xpToReach(2, CURVE), `${warmupMax} XP in a warm-up reaches level 2 (${xpToReach(2, CURVE)})`);
-  assert.ok(XP.welcome >= xpToReach(2, CURVE), "the Welcome Bonus alone is level 2 on the real profile");
+  const badges = badgeXp("first_punch") + badgeXp("first_combo") + badgeXp("warmup_done");
+  // least: five punches, one combo (so the combo badge and one free combo), the round bonus, the Welcome Bonus; most: five free combos
+  const least = XP.freeCombo + XP.warmup + badges + XP.welcome;
+  const most = XP.freeCombo * XP.freeComboMax + XP.warmup + badges + XP.welcome;
+  assert.ok(least >= xpToReach(2, CURVE), `${least} XP at the least reaches level 2 (${xpToReach(2, CURVE)})`);
+  assert.ok(most < xpToReach(3, CURVE), `${most} XP at the most stays under level 3 (${xpToReach(3, CURVE)}): the README and the design promise Level 2`);
   assert.ok(xpToReach(2, CURVE) < xpToReach(3, CURVE) && xpToReach(3, CURVE) < xpToReach(4, CURVE));
 });
 
-test("a full coached session lands on level 4 or just past it (the design's pacing check), under the 200 XP day cap", () => {
-  // 3 rounds of about 12 calls at about 5 XP, plus the round, plus 25 for the session, with the day cap quartering what is past 200
-  const raw = 3 * (12 * XP.called.great + XP.round) + XP.session;
-  const capped = Math.min(raw, XP.dayCap) + Math.max(0, raw - XP.dayCap) / 4;
+test("pacing: the first coached sitting lands on level 4 or just past it, badges and Perfect weight included; the whole call ladder takes weeks, not three sittings", () => {
+  const badgeXp = (ids) => ids.reduce((a, id) => a + BADGES.find((b) => b.id === id).xp, 0);
+  const oneTime = badgeXp(["first_round", "session_done", "called_it", "perfect_timing", "flow_3", "book_5"]);
+  // the most a first sitting can pay: the warm-up at its most, then three rounds of twelve Perfect calls, free combos, round, Strong Finish, the session bonus and every one-time badge
+  const warm = XP.freeCombo * XP.freeComboMax + XP.warmup + badgeXp(["first_punch", "first_combo", "warmup_done"]) + XP.welcome;
+  const round = 12 * XP.called.perfect + XP.freeCombo * XP.freeComboMax + XP.round + XP.strongFinish;
+  const raw = warm + 3 * round + XP.session + oneTime;
+  const capped = Math.min(raw, XP.dayCap) + Math.max(0, raw - XP.dayCap) / 4;     // the day cap quarters what is past 200
   const level = levelFromXp(Math.round(capped), CURVE).level;
-  assert.ok(level >= 4 && level <= 5, `level ${level} after ${Math.round(capped)} XP`);
+  assert.ok(level >= 4 && level <= 5, `level ${level} after ${Math.round(capped)} XP (${raw} before the day cap)`);
+  // the Ring General calls (Level 8) at three sittings a week: more than a week of play, not three sittings of one day each
+  const perDay = Math.round(capped);
+  const sittingsTo8 = Math.ceil(xpToReach(8, CURVE) / perDay);
+  assert.ok(sittingsTo8 >= 5, `${sittingsTo8} full-cap sittings to Level 8`);
 });
 
 test("twelve titles, one per level, and the title for a level comes from the table", () => {
@@ -218,4 +229,40 @@ test("Label Lab XP: flat, once per punch, 20 a session, nothing for Mark all or 
   assert.equal(labelReviewXp({ paid: 0, sim: true }), 0);
   assert.equal(labelReviewXp.length, 1, "one options object: there is no input for whether the label changed or matched");
   assert.ok(!/changed|agree|match|correct/i.test(labelReviewXp.toString().split("{")[0] + labelReviewXp.toString().split("\n")[0]));
+});
+
+// ---- the review fixes in the rules
+
+test("a called round that ignores the coach cannot grade Solid: the other parts only count in proportion to how the calls went", () => {
+  const ps = stream(40, { gap: 200 }), endT = ps.at(-1).t;
+  const run = (judgment) => roundGrade({ punches: ps, calls: Array.from({ length: 8 }, () => ({ judgment })), startT: 0, endT, roundMs: endT, flowPeak: 1 });
+  const ignored = run("missed"), good = run("good"), perfect = run("perfect");
+  assert.ok(ignored.score < 50, `ignoring every call scores ${ignored.score}`);
+  assert.equal(ignored.grade, "warmup");
+  assert.ok(ignored.score < good.score && good.score < perfect.score, `${ignored.score} < ${good.score} < ${perfect.score}`);
+  assert.equal(perfect.grade, "fire");
+  const sum = (g) => Object.values(g.parts).reduce((a, b) => a + b, 0);
+  assert.ok(Math.abs(sum(ignored) - ignored.score) <= 0.5 + 1e-9, "the parts on the grade card add up to the score");
+  // free work is unchanged: no calls, no scaling
+  const free = roundGrade({ punches: ps, calls: [], startT: 0, endT, roundMs: endT });
+  assert.equal(free.mode, "free");
+});
+
+test("a round under a minute pays no round, Strong Finish or session bonus and a smaller free-combo cap; the warm-up is exempt", () => {
+  const o = { completedFrac: 1, punches: 30, freeCombos: 9, strongFinish: true, fullSession: true };
+  const full = roundXp({ ...o, roundMs: XP.minRoundMs });
+  assert.equal(full.parts.round, XP.round);
+  assert.equal(full.parts.strong, XP.strongFinish);
+  assert.equal(full.parts.session, XP.session);
+  assert.equal(full.parts.free, XP.freeCombo * XP.freeComboMax);
+  const tiny = roundXp({ ...o, roundMs: 6000 });
+  assert.deepEqual([tiny.parts.round, tiny.parts.strong, tiny.parts.session, tiny.parts.free, tiny.total], [0, 0, 0, 0, 0]);
+  assert.equal(tiny.short, true);
+  const half = roundXp({ ...o, roundMs: XP.minRoundMs / 2 });
+  assert.equal(half.parts.free, XP.freeCombo * Math.floor(XP.freeComboMax / 2), "the free-combo cap shrinks in proportion");
+  assert.equal(half.parts.round, 0);
+  const warm = roundXp({ ...o, warmup: true, roundMs: 30000 });
+  assert.equal(warm.parts.round, XP.warmup);
+  assert.equal(warm.parts.free, XP.freeCombo * XP.freeComboMax, "the 30-second warm-up keeps its full table");
+  assert.equal(roundXp({ ...o }).parts.round, XP.round, "no roundMs given: a full round");
 });

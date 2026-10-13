@@ -8,7 +8,10 @@ export const COPY = {
   note: "Training and performance summaries, not medical measurements.",
 
   nav: { label: "Sections", play: "Play", live: "Punches", lab: "Lab details", settings: "Settings" },
-  mode: { label: "View", fight: "Fight", lab: "Lab", fightTitle: "Game view: warm-up, coach calls, grades", labTitle: "Lab view: every card, table and export" },
+  mode: {
+    label: "View", fight: "Fight", lab: "Lab", fightTitle: "Game view: warm-up, coach calls, grades", labTitle: "Lab view: every card, table and export",
+    busy: (next) => `A set is running. Stop it first, then switch to ${next === "lab" ? "Lab" : "Fight"}.`,
+  },
   setup: { open: "Setup", close: "Hide setup", title: "Sensors, simulate, exports and reset" },
 
   hero: {
@@ -17,7 +20,7 @@ export const COPY = {
     warmup: "Start 30-second warm-up",
     sim: "Simulate (no sensors)",
     simOn: "Simulating. Tap to stop",
-    noSensor: "No wrist sensor is connected yet. Connect one under Setup, or try it with Simulate.",
+    noSensor: "No wrist sensor is connected yet. Tap Simulate to try it now, or connect one under Setup.",
     sessionOnPage: "A session is still on this page. Starting a new one clears it, so export the CSV first if you want to keep the punches.",
     backTitle: "Ready for a round?",
     backSub: "Coach calls change every round. Throw what you hear.",
@@ -28,6 +31,7 @@ export const COPY = {
   },
   chip: {
     simNote: "Simulate: XP isn't saved, except your Welcome Bonus.",
+    unsaved: "This browser blocks storage, so XP is kept only until you close the page.",
     welcomeKept: (n) => `Welcome Bonus +${n} XP kept on this device.`,
     xpSaved: "Saved on this device only.",
   },
@@ -38,8 +42,11 @@ export const COPY = {
     start: "Warm up. Easy jabs.",
     nudgePunch: "Throw an easy jab at the bag. Either wrist works.",
     nudgeCombo: "Throw two punches in a row, under half a second apart.",
+    nudgeKeep: "Keep it easy until the bell.",
     assist: "Nothing yet? Tap Simulate to see how it works.",
     won: "Warm-up done. That was your first win.",
+    empty: "No punches were read. Check your sensor, or tap Simulate to see how it works.",
+    few: (n) => `Only ${n} ${plural(n, "punch", "punches")} read. Throw a few more and the warm-up counts.`,
   },
 
   call: {
@@ -55,11 +62,28 @@ export const COPY = {
     read: (read, call) => `The sensor read ${read}. You called ${call}.`,
     countIt: "Count it",
     counted: "Counted",
-    countItHelp: "Counts the combo and saves your corrected labels.",
+    countItHelp: "Counts the combo. Your labels stay as they are; review them in the Punch Log.",
     countItLimit: "That is five counted this round. The rest stay as read.",
     next: "Next call coming up.",
     ready: "Free work until the coach calls. Keep it loose.",
     rest: "Rest. Take all of it.",
+    stopped: "Stopped. What you threw is graded.",
+    easeOffer: "Your speed has eased. Stopping here is a fine call.",
+    easeStop: "Stop here",
+    stop: "Stop",
+  },
+
+  stage: {
+    tally: (n) => `${n} ${plural(n, "punch", "punches")}`,
+    beatsLabel: "First win steps",
+    beats: { punch: "First punch", combo: "First combo", bell: "Warm-up bell" },
+    beatDone: "done",
+    beatTodo: "to do",
+  },
+
+  clear: {
+    warn: (punches, labelled) => `Starting over clears ${punches} ${plural(punches, "punch", "punches")} and ${labelled} ${plural(labelled, "label")} you reviewed. Export the CSV first to keep them, or tap again to clear.`,
+    again: "Tap again to clear",
   },
 
   digits: { 1: "One", 2: "Two", 3: "Three", 4: "Four", 5: "Five", 6: "Six" },
@@ -103,6 +127,12 @@ export const COPY = {
     xp: (n) => `+${n} XP`,
     fade: "Speed eased late. Stopping here is a fine call.",
     day: "That's a full day on the bag. Cool down.",
+    softCap: (n) => `Past ${n} XP in a day, rounds pay a quarter. Fresh XP comes back tomorrow.`,
+    short: "Rounds under a minute pay no round bonus.",
+    demo: "Simulate demo: this XP and level are not saved.",
+    firstWin: (s) => `First win in ${s} seconds`,
+    firstWinLine: "That was your first win. Coach calls start next.",
+    few: "A few punches were read. Throw more next time and the warm-up counts.",
     empty: "No punches were read this round.",
     aria: (name, score, xp) => `Round Grade: ${name}, ${score} points, ${xp} XP.`,
   },
@@ -127,6 +157,7 @@ export const COPY = {
     comboCalled: (j) => `${j} on a coach call`,
     comboLongest: "Your longest chain",
     comboNone: "No chain yet. A chain is punches under 0.6 seconds apart.",
+    oneRound: (grade, score, punches, xp) => `${grade} ${score} · ${punches} ${plural(punches, "punch", "punches")} · +${xp} XP`,
     comboBook: (n) => `${n} different ${plural(n, "combo")} this session`,
     next: "Up next",
     nextUnlock: (level, what) => `Level ${level} opens ${what}.`,
@@ -235,6 +266,8 @@ export const COPY = {
   },
 
   celebrate: {
+    demoEyebrow: "Level up in the demo",
+    demoXp: "+{xp} XP in this demo, not saved",
     firstWin: "First win",
     levelNote: (level, title) => `Level ${level}: ${title}`,
     dayCap: "That's a full day on the bag. Cool down.",

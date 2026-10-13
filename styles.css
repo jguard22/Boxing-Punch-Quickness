@@ -9,11 +9,11 @@
   --teal: #00d4aa; --teal-dim: #0aa88a; --amber: #ffb020; --red: #ff5468; --blue: #4f8dff; --violet: #b06bff;
   --text: #eef1ff; --muted: #9aa3c7; --line: #343b7a;
   /* text-safe versions of the status colours (the plain ones are fills and glows): the same in the dark look, darker in the light one */
-  --teal-text: var(--teal); --amber-text: var(--amber); --red-text: var(--red); --blue-text: var(--blue); --violet-text: var(--violet);
+  --teal-text: var(--teal); --amber-text: var(--amber); --red-text: #ff7486; --blue-text: #86b0ff; --violet-text: var(--violet);
   --ink-teal: #06251d; --ink-teal-2: #04211a; --ink-amber: #2a1a02; --amber-dark: #5a4a12;
   /* color — punch types + hands */
-  --c-jab: var(--teal); --c-cross: var(--blue); --c-hook: var(--amber); --c-uppercut: var(--violet);
-  --c-left: var(--teal); --c-right: var(--blue);
+  --c-jab: var(--teal); --c-cross: var(--blue-text); --c-hook: var(--amber); --c-uppercut: var(--violet);
+  --c-left: var(--teal); --c-right: var(--blue-text);
   /* color math */
   --tint: 18%; --tint-strong: 34%; --soft-line: 60%; --card-fade: 60%; --glow: 80%; --glow-faint: 50%;
 
@@ -49,7 +49,7 @@
   --dur-pop: .26s; --dur-stamp: .34s; --dur-slide: .22s;
   --ease-out: cubic-bezier(.22, 1, .36, 1); --ease-spring: cubic-bezier(.34, 1.56, .64, 1);
   --pop-scale: 1.16; --stamp-scale: 1.5; --stamp-rot: -3deg;
-  --on-red: var(--text);
+  --on-red: #2a0a10;                          /* dark ink on the coral red fill: the light text token is only 2.8:1 there */
 
   /* misc */
   --op-disabled: .4; --op-dim: .5; --dash: 4 4; --ease-pulse: ease-in-out;
@@ -68,6 +68,7 @@
   --c-jab: var(--teal-text); --c-cross: var(--blue-text); --c-hook: var(--amber-text); --c-uppercut: var(--violet-text);
   --c-left: var(--teal-text); --c-right: var(--blue-text);
   --on-red: #ffffff;
+  --tint: 12%;                                /* lighter tints in the light look keep teal, blue and violet text on their chips above 4.5:1 */
 }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }

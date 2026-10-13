@@ -13,10 +13,13 @@ const setText = (el, t) => { if (el && el.textContent !== t) el.textContent = t;
 const show = (el, on) => { if (el) el.hidden = !on; };
 const pressed = (group, value) => group?.querySelectorAll("button").forEach((b) => { const on = b.dataset.v === value; b.classList.toggle("on", on); b.setAttribute("aria-pressed", String(on)); });
 const restartAnim = (el, cls) => { if (!el) return; el.classList.remove(cls); void el.offsetWidth; el.classList.add(cls); };
+/** Scroll an element into place at once (never an animation: a call cannot wait for one). */
+const jump = (el, block) => { try { el.scrollIntoView({ block, behavior: "instant" }); } catch { try { el.scrollIntoView({ block }); } catch { /* no scrolling here */ } } };
 
 export function createView() {
   let actions = {};
   let live = { last: 0, timer: null, pending: null };
+  let recapBase = "", warnText = "";
 
   // ---- screen reader announcements: at most one every three seconds, the latest wins
   function announce(text) {
@@ -31,7 +34,7 @@ export function createView() {
   }
 
   // ---- status: level bar, week, the Simulate note
-  function renderStatus({ info, week, demo }) {
+  function renderStatus({ info, week, demo, unsaved }) {
     const root = $("fun-status");
     if (!root) return;
     const chips = document.createElement("div");
@@ -40,16 +43,18 @@ export function createView() {
     chip(COPY.status.xp(info.total ?? 0));
     if (week) chip(week.reached ? COPY.status.weekDone : COPY.status.week(week.count, week.target), week.reached ? "on" : "");
     if (demo) chip(COPY.chip.simNote, "warn");
+    if (unsaved) chip(COPY.chip.unsaved, "warn");
     root.replaceChildren(renderXpBar(info, { label: COPY.status.level }), chips);
   }
 
   // ---- hero
-  function setHero({ first, coachText, sim }) {
+  function setHero({ first, coachText, sim, ready }) {
     setText($("hero-title"), first ? COPY.hero.title : COPY.hero.backTitle);
     setText($("hero-sub"), first ? COPY.hero.sub : COPY.hero.backSub);
     const w = $("hero-warmup"), s = $("hero-sim");
-    if (w) { setText(w, first ? COPY.hero.warmup : coachText); w.dataset.kind = first ? "warmup" : "coach"; }
-    if (s) { setText(s, sim ? COPY.hero.simOn : COPY.hero.sim); s.setAttribute("aria-pressed", String(!!sim)); }
+    if (w) { setText(w, first ? COPY.hero.warmup : coachText); w.dataset.kind = first ? "warmup" : "coach"; w.classList.toggle("primary", !!ready); }
+    // the teal button is the one that works right now: with no sensor and no Simulate that is Simulate, never a button that only shows a hint
+    if (s) { setText(s, sim ? COPY.hero.simOn : COPY.hero.sim); s.setAttribute("aria-pressed", String(!!sim)); s.classList.toggle("primary", !ready); }
     const again = $("hero-warm");
     if (again) { setText(again, COPY.hero.again); show(again, !first); }
   }
@@ -59,9 +64,50 @@ export function createView() {
     el.textContent = text || "";
     show(el, !!text);
   }
-  function layout({ hero, stage, grade, actions: act }) {
+  function layout({ hero, stage, grade, actions: act, recap: hasRecap = true }) {
+    const had = document.activeElement;
     show($("fun-hero"), !!hero); show($("fun-stage"), !!stage); show($("fun-grade"), !!grade); show($("grade-actions"), !!act);
+    show($("grade-recap"), hasRecap);                                         // a round with nothing read has nothing to recap
+    document.documentElement.dataset.playing = stage ? "1" : "0";            // a phone screen is for the round while it runs (fun.css drops the status and header extras)
+    // the control that had keyboard focus may just have been hidden: land on whatever replaced it, not on the top of the page
+    if (had && had !== document.body && !had.getClientRects().length) focusPlay();
   }
+  /** Keyboard focus to the part of the Play area that is showing (programmatic only: the cards are not tab stops). */
+  function focusPlay() {
+    const target = [$("fun-stage"), $("fun-grade"), $("fun-hero")].find((el) => el && !el.hidden);
+    try { target?.focus({ preventScroll: true }); } catch { /* none */ }
+  }
+  /** The stage goes to the top of the screen when a round starts, so the call and the Count it button are where the eyes are. */
+  function showStage() { const el = $("fun-stage"); if (el && !el.hidden) jump(el, "start"); }
+  function showHero() { const el = $("fun-hero"); if (el && !el.hidden) jump(el, "nearest"); }
+  /** Bring one element of the stage fully on screen if it is not (a call opening while the page is scrolled elsewhere). */
+  function reveal(id) {
+    const el = $(id);
+    if (!el || el.hidden) return;
+    const nav = document.querySelector("nav.sections"), top = nav ? nav.getBoundingClientRect().bottom : 0, vh = window.innerHeight;
+    const fits = () => { const r = el.getBoundingClientRect(); return r.top >= top && r.bottom <= vh; };
+    if (fits()) return;
+    const stage = $("fun-stage");
+    if (stage && !stage.hidden) jump(stage, "start");
+    if (!fits()) jump(el, "nearest");
+  }
+  /** The two-tap warning before starting over would clear reviewed labels: text near whatever is on screen, and the buttons say "Tap again". */
+  function clearWarn(text, againText) {
+    const on = !!text;
+    const gw = $("grade-warn"); if (gw) { gw.textContent = text || ""; show(gw, on); }
+    const hh = $("hero-hint");
+    if (on) { const hero = $("fun-hero"); if (hero && !hero.hidden) hint(text); warnText = text; }
+    else { if (hh && warnText && hh.textContent === warnText) hint(null); warnText = ""; }
+    const rn = $("recap-note"); if (rn && $("fun-recap")?.open) setText(rn, on ? text : recapBase);
+    for (const id of ["grade-again", "recap-cta"]) {
+      const b = $(id);
+      if (!b) continue;
+      if (on) { b.dataset.base ??= b.textContent; setText(b, againText); b.classList.add("confirm"); }
+      else if (b.dataset.base != null) { setText(b, b.dataset.base); delete b.dataset.base; b.classList.remove("confirm"); }
+    }
+  }
+  /** What the Play again button on the grade card says (Warm-up again until the first win has landed). */
+  function againLabel(text) { const b = $("grade-again"); if (!b) return; if (b.dataset.base != null) b.dataset.base = text; else setText(b, text); }
 
   // ---- stage
   function setStage({ phase, callsOn, voiceOn, running }) {
@@ -73,6 +119,30 @@ export function createView() {
     if (stop) show(stop, !!running);
   }
   const stageTime = (text) => setText($("stage-time"), text);
+  const stageTally = (n) => setText($("stage-tally"), COPY.stage.tally(n));
+  /** How far through the round the clock is, as a bar (quiet: no sound, no celebration). */
+  function stageProgress(frac) { const b = $("stage-bar"); if (b) b.style.width = `${Math.round(Math.max(0, Math.min(1, frac || 0)) * 100)}%`; }
+  /** The three first-win steps in the warm-up, ticking off as they land. Null hides them. */
+  function beats(state) {
+    const box = $("stage-beats");
+    if (!box) return false;
+    show(box, !!state);
+    if (!state) return false;
+    box.querySelectorAll(".beat").forEach((el) => {
+      const done = !!state[el.dataset.b], label = COPY.stage.beats[el.dataset.b];
+      el.dataset.done = done ? "1" : "0"; el.dataset.glyph = done ? "✓" : "○";
+      setText(el, label);
+      el.setAttribute("aria-label", `${label}, ${done ? COPY.stage.beatDone : COPY.stage.beatTodo}`);
+    });
+    return true;
+  }
+  /** A round whose speed fell by more than a quarter offers to stop: the Stop button says so (the round is never stopped for you). */
+  function easeOffer(on) {
+    const b = $("stage-stop");
+    if (!b) return;
+    b.classList.toggle("suggest", !!on);
+    setText(b, on ? COPY.call.easeStop : COPY.call.stop);
+  }
   /** The stage keeps its own copy of the last punch, so the answer to a punch is where the eyes already are. */
   function mirrorLast() {
     const t = $("last-type"), st = $("stage-last");
@@ -226,9 +296,9 @@ export function createView() {
     setText($("grade-tag"), g.warmup ? COPY.grade.warmupRound : g.empty ? "" : `${g.score} / 100`);
     const xpEl = $("grade-xp");
     if (xpEl) countUp(xpEl, g.xp, { format: (v) => COPY.grade.xp(Math.round(v)), duration: 700 });
-    setText($("grade-line"), g.empty ? COPY.grade.empty : COPY.grade.lines[g.grade]);
+    setText($("grade-line"), g.line ?? (g.empty ? COPY.grade.empty : COPY.grade.lines[g.grade]));
     const rb = $("grade-ribbon");
-    if (rb) { rb.textContent = COPY.grade.strong; rb.title = COPY.grade.strongLine; show(rb, !!g.strong); }
+    if (rb) { rb.textContent = g.ribbon ?? COPY.grade.strong; rb.title = g.ribbon ? "" : COPY.grade.strongLine; show(rb, !!(g.ribbon || g.strong)); }
     const parts = $("grade-parts");
     if (parts) {
       parts.replaceChildren(...Object.entries(g.parts ?? {}).filter(([, v]) => v != null).map(([k, v]) => {
@@ -257,7 +327,7 @@ export function createView() {
     const carousel = renderRecapCarousel(cards, { labels: { slide: "{n} of {total}", recapRegion: COPY.recap.aria } });
     const first = carousel.querySelector(".fk-recap-card");
     const roundsCard = cards[0];
-    if (first && roundsCard?.rounds?.length) {
+    if (first && roundsCard?.rounds?.length > 1) {
       const maxRate = Math.max(1, ...roundsCard.rounds.map((r) => r.perMin ?? 0));
       const bars = document.createElement("div"); bars.className = "rounds-bars";
       for (const r of roundsCard.rounds) {
@@ -268,15 +338,19 @@ export function createView() {
         rb.append(bar, g, lab); bars.append(rb);
       }
       first.append(bars);
+    }
+    if (first && roundsCard?.rounds?.length) {
       if (xpInfo) { const x = document.createElement("div"); x.className = "recap-xp"; x.append(renderXpBar(xpInfo, { label: COPY.status.level })); first.append(x); }
     }
     $("recap-body")?.replaceChildren(carousel);
     setText($("recap-title"), COPY.recap.title);
-    const cb = $("recap-cta"); if (cb) { setText(cb, cta.label); cb.onclick = () => { close(); onCta?.(); }; }
+    // the CTA may be waiting for a second tap (starting over would clear reviewed labels): then the sheet stays open
+    const cb = $("recap-cta"); if (cb) { delete cb.dataset.base; cb.classList.remove("confirm"); setText(cb, cta.label); cb.onclick = () => { const go = onCta?.(); if (go === false) return; close(); focusPlay(); }; }
     const lb = $("recap-later"); if (lb) { setText(lb, COPY.recap.cta.later); lb.onclick = () => { close(); onLater?.(); }; }
     const eb = $("recap-export"); if (eb) { setText(eb, COPY.recap.export); eb.onclick = () => onExport?.(); }
     const xb = $("recap-close"); if (xb) xb.onclick = () => close();
-    setText($("recap-note"), note || "");
+    recapBase = note || "";
+    setText($("recap-note"), recapBase);
     const fb = $("recap-feedback");
     show(fb, !!ask);
     if (fb && ask) {
@@ -343,6 +417,7 @@ export function createView() {
     on("stage-voice", () => actions.voice?.());
     on("stage-stop", () => actions.stop?.());
     on("btn-countit", () => actions.countIt?.());
+    $("btn-rounds")?.addEventListener("click", (e) => actions.rounds?.(e), true);          // capture: the Fight view may answer before the page's own handler starts a silent round
     on("grade-recap", () => actions.recap?.());
     on("grade-again", () => actions.again?.());
     on("btn-lab", () => actions.lab?.());
@@ -363,7 +438,8 @@ export function createView() {
   }
 
   return {
-    bind, announce, renderStatus, setHero, hint, layout, setStage, coach, flow, showCall, digit, ring, endCall, clearCall, stamp, countIt,
+    bind, announce, renderStatus, setHero, hint, layout, focusPlay, showStage, showHero, reveal, clearWarn, againLabel, setStage, coach, flow, showCall, digit, ring, endCall, clearCall, stamp, countIt,
+    stageTally, stageProgress, beats, easeOffer,
     punchPop, mirrorLast, stageTime, tier, lastNote, book, pbShelf, gradeCard, reminder, recap, recapNote, closeRecap, settings, mode, lab, setup, forgetLabel,
     tierNames: SPEED_TIERS.map((t) => t.id),
   };

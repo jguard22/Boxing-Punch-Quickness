@@ -63,7 +63,7 @@
 <section id="play" class="play fun-only" aria-labelledby="hero-title">
   <div id="fun-status" class="fun-status"></div>
 
-  <div id="fun-hero" class="card hero">
+  <div id="fun-hero" class="card hero" role="group" aria-labelledby="hero-title" tabindex="-1">
     <h2 id="hero-title" class="hero-title">Bag work, but it talks back.</h2>
     <p class="hero-sub" id="hero-sub">The coach calls a combo, you throw it, the bell keeps score.</p>
     <div class="row hero-actions">
@@ -75,8 +75,14 @@
     <p class="safety" id="hero-safety">Wrap your hands. Warm up first. Stop if anything hurts.</p>
   </div>
 
-  <div id="fun-stage" class="card stage" hidden>
-    <h2>Coach <span class="tag"><span id="stage-phase">Warm-up</span> · <span id="stage-time">0:30</span></span></h2>
+  <div id="fun-stage" class="card stage" role="group" aria-labelledby="stage-title" tabindex="-1" hidden>
+    <h2 id="stage-title">Coach <span class="tag"><span id="stage-phase">Warm-up</span> · <span id="stage-time">0:30</span></span></h2>
+    <div class="progress stage-progress" aria-hidden="true"><i id="stage-bar"></i></div>
+    <div class="beats" id="stage-beats" role="list" aria-label="First win steps" hidden>
+      <span class="beat" role="listitem" data-b="punch" data-done="0">First punch</span>
+      <span class="beat" role="listitem" data-b="combo" data-done="0">First combo</span>
+      <span class="beat" role="listitem" data-b="bell" data-done="0">Warm-up bell</span>
+    </div>
     <div class="stage-bar">
       <span class="chip flow" id="stage-flow" hidden>Flow x1</span>
       <button class="ghost sm" id="stage-voice" aria-pressed="false" title="Speak each call out loud">Voice off</button>
@@ -98,13 +104,14 @@
       <span class="badge pt-jab" id="stage-last">—</span>
       <span class="live-speed"><b id="stage-speed">—</b><span class="unit u-speed">m/s</span></span>
       <span class="combo-str" id="stage-combo">—</span>
+      <span class="tally" id="stage-tally">0 punches</span>
       <span class="tier" id="stage-tier" hidden></span>
     </div>
     <p class="coach-line" id="coach-line">Coach calls start with your next round.</p>
   </div>
 
-  <div id="fun-grade" class="card grade" hidden>
-    <h2>Round Grade <span class="tag" id="grade-tag"></span></h2>
+  <div id="fun-grade" class="card grade" role="group" aria-labelledby="grade-title" tabindex="-1" hidden>
+    <h2 id="grade-title">Round Grade <span class="tag" id="grade-tag"></span></h2>
     <div class="grade-row">
       <div class="grade-stamp" id="grade-stamp" aria-hidden="true"></div>
       <div class="grade-info">
@@ -119,6 +126,7 @@
       <button class="primary" id="grade-recap">Recap</button>
       <button id="grade-again">Play again</button>
     </div>
+    <p class="note warn-note" id="grade-warn" role="status" hidden></p>
   </div>
 </section>
 

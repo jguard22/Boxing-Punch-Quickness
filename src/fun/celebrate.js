@@ -6,6 +6,7 @@
 import { createQuietGate, createSound, playOutcome, setReducedMotion, dismissCelebrations } from "../vendor/fun-kit/index.js";
 import { getKit } from "./kit.js";
 import { SOUND_PLANS, HIT_SOUND, JUDGMENT_SOUND, FEATURES } from "./config.js";
+import { COPY } from "./copy.js";
 import { hapticAllowed } from "./rules.js";
 
 const live = { quiet: () => false, windowOpen: () => false, lastOnsetT: null, device: null, now: () => performance.now() };
@@ -67,14 +68,15 @@ export const bindDevice = (fn) => { live.device = typeof fn === "function" ? fn 
  * Everything a round (or a level-up from a label review) earned, as one gated unit: the kit's staged cues (level-up with its modal and the features it opens,
  * personal bests, badges, a kind note). Plays when the gate is open, which is the moment a round ends; waits (and is dropped
  * if it waits too long) while one is running.
- * @param {{outcome:object}} bundle
+ * @param {{outcome:object, demo?:boolean}} bundle demo: the level-up modal says the level and XP belong to the Simulate demo and are not saved
  * @returns {Promise<{ran:boolean, result?:string[], reason?:string}>} settles when the staged cues and any level-up modal are done
  */
-export function celebrateOutcome({ outcome }) {
+export function celebrateOutcome({ outcome, demo = false }) {
   const kit = getKit();
+  const labels = demo ? { levelUpEyebrow: COPY.celebrate.demoEyebrow, xpThisSession: COPY.celebrate.demoXp } : undefined;
   const handle = gate.run(async () => playOutcome(outcome, {
     sound: soundOn() ? sound : null, haptics: null, guardrails: kit.guard, modal: true, maxToasts: 3, maxBadgeToasts: 2,
-    featureLabel: (id) => FEATURES[id]?.label ?? id,
+    featureLabel: (id) => FEATURES[id]?.label ?? id, ...(labels ? { labels } : {}),
   }), { label: "round", key: "round-outcome", priority: 2, maxAgeMs: 10 * 60000 });
   return handle.done;
 }

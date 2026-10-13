@@ -339,3 +339,35 @@ test("the kit's welcome-back lines are this page's own: wrap up and warm up, bes
   assert.deepEqual(kit.guard.lintCopy(short), []);
   assert.deepEqual(kit.guard.lintCopy(long), []);
 });
+
+test("a browser that throws on the localStorage property itself (not just on a write) still gets defaults, not an exception", async () => {
+  const had = Object.getOwnPropertyDescriptor(globalThis, "localStorage");
+  Object.defineProperty(globalThis, "localStorage", { configurable: true, get() { throw new DOMException("denied", "SecurityError"); } });
+  try {
+    const p = await import("../src/fun/prefs.js");
+    assert.deepEqual(p.load(), { ...p.DEFAULTS });
+    assert.equal(p.save({ theme: "light" }), false);
+    assert.equal(p.loadMode(), "fight");
+    assert.equal(p.saveMode("lab"), false);
+    assert.doesNotThrow(() => p.forget());
+  } finally {
+    if (had) Object.defineProperty(globalThis, "localStorage", had); else delete globalThis.localStorage;
+  }
+});
+
+test("a single graded round's recap title is its own line once, not the grade followed by the same line again", async () => {
+  const { buildRecapCards } = await import("../src/fun/recap.js");
+  const card = buildRecapCards({
+    rounds: [{ n: 1, grade: "fire", score: 98, punches: 187, perMin: 62, xp: 200, warmup: false }], best: { kind: null, str: "" }, comboCount: 0, level: 4, title: "Jab Machine",
+    nextUnlock: null, week: null, heldPct: null, eased: false, demo: false, welcome: 0, resetsOnNew: false,
+  })[0];
+  assert.equal(card.title, "Fire 98 · 187 punches · +200 XP");
+  assert.deepEqual(card.list, []);
+  assert.doesNotMatch(card.title, /Round 1/);
+  const two = buildRecapCards({
+    rounds: [{ n: 1, grade: "fire", score: 98, punches: 187, perMin: 62, xp: 100, warmup: false }, { n: 2, grade: "sharp", score: 71, punches: 150, perMin: 50, xp: 80, warmup: false }],
+    best: { kind: null, str: "" }, comboCount: 0, level: 4, title: "Jab Machine", nextUnlock: null, week: null, heldPct: null, eased: false, demo: false, welcome: 0, resetsOnNew: false,
+  })[0];
+  assert.equal(two.title, "Fire, Sharp");
+  assert.equal(two.list.length, 2);
+});

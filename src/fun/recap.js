@@ -34,9 +34,12 @@ export function buildRecapCards(o) {
   const R = COPY.recap;
   const rounds = o.rounds ?? [];
   const roundLines = rounds.map((r) => (r.warmup ? R.warmLine(r.punches, r.xp) : R.roundLine(r.n, gradeName(r.grade), r.score, r.punches, r.xp)));
+  // one graded round: its own line is the title (the grade, the points, the punches, the XP), so the card never says it twice
+  const one = rounds.length === 1 && !rounds[0].warmup ? rounds[0] : null;
   const cards = [{
     id: "rounds", kind: "rounds", tone: "accent", eyebrow: R.rounds, big: R.roundsBig(rounds.length),
-    title: rounds.length && rounds.every((r) => r.warmup) ? R.warmTitle : rounds.map((r) => gradeName(r.grade)).join(", ") || COPY.grade.empty, list: roundLines,
+    title: rounds.length && rounds.every((r) => r.warmup) ? R.warmTitle : one ? R.oneRound(gradeName(one.grade), one.score, one.punches, one.xp) : rounds.map((r) => gradeName(r.grade)).join(", ") || COPY.grade.empty,
+    list: one ? [] : roundLines,
     rounds: rounds.map((r) => ({ n: r.n, grade: r.grade, glyph: GRADES.find((g) => g.id === r.grade)?.shape ?? "dash", perMin: r.perMin, score: r.score })),
   }];
 

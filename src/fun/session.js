@@ -12,16 +12,15 @@ import { buildRecapCards, bestMoment } from "./recap.js";
 import { simResponse } from "./sim-driver.js";
 import { bookAdd, bookCounts, bookPages } from "./book.js";
 import {
-  XP, WARMUP, FIRST_WIN, SPEED_PB_IDS, CALL, FLOW, JUDGMENTS,
+  XP, WARMUP, FIRST_WIN, SPEED_PB_IDS, CALL, FLOW, JUDGMENTS, FADE_STOP_PCT,
 } from "./config.js";
 import {
-  speedGateOpen, speedTier, roundGrade, roundXp, bumpDayCount, roundsOnDay, mean, labelReviewXp,
+  speedGateOpen, speedTier, roundGrade, roundXp, bumpDayCount, roundsOnDay, mean, labelReviewXp, fadePct,
 } from "./rules.js";
 import {
-  parseCall, callSchedule, windowState, judge, flowStart, flowStep, handFor, nextUnlock, readNum,
+  parseCall, callSchedule, windowState, judge, flowStart, flowStep, handFor, nextUnlock,
 } from "./calls.js";
 
-const TYPE_FOR_NUM = { 1: "jab", 2: "cross", 3: "hook", 4: "hook", 5: "uppercut", 6: "uppercut" };
 const DAY_OPTS = { rolloverHour: 4 };
 const ROUNDS_KEY = "log.rounds";
 const FEEDBACK_KEY = "log.feedback";
@@ -37,13 +36,13 @@ export function createSession({ view, win = globalThis.window, now = () => perfo
   const stats = createStats(kit.store);
   const firstWin = createFirstWin({
     store: kit.store, now: wall, winEvent: FIRST_WIN.winEvent, nudgeAfterMs: FIRST_WIN.nudgeAfterMs, assistAfterMs: FIRST_WIN.assistAfterMs,
-    beats: FIRST_WIN.beats.map((b) => ({ ...b, text: COPY.coachMarks[b.id === "warmup" ? "won" : b.id], hint: b.id === "punch" ? COPY.coachMarks.nudgePunch : COPY.coachMarks.nudgeCombo })),
+    beats: FIRST_WIN.beats.map((b) => ({ id: b.id, on: b.on, text: COPY.coachMarks[b.text], hint: COPY.coachMarks[b.hint] })),
   });
 
   let prefs = prefsStore.load();
   let mode = win.document?.documentElement.dataset.mode === "lab" ? "lab" : "fight";
   const simRng = (() => { let a = (wall() ^ 0x9e3779b9) >>> 0; return () => { a = (a + 0x6d2b79f5) >>> 0; let t = a; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; })();
-  const st = { set: null, round: null, ticker: null, fwTick: 0, forgetArmed: null, hold: null };
+  const st = { set: null, round: null, ticker: null, fwTick: 0, forgetArmed: null, clearArmed: null, exportedSig: null };
 
   const cmd = (name, extra = {}) => win.dispatchEvent(new win.CustomEvent("bwcmd", { detail: { cmd: name, ...extra } }));
   /** This week's ring from the streak's read-only state (kit.summary() also pins today's challenges, which would write after Forget my data). */
@@ -56,25 +55,29 @@ export function createSession({ view, win = globalThis.window, now = () => perfo
   const fmtDur = (ms) => (ms >= 60000 ? `${+(ms / 60000).toFixed(2)} min` : `${Math.round(ms / 1000)} s`);
   const roundText = () => fmtDur(S().settings.roundMin * 60000);
   const callsOn = () => prefs.calls === "on";
+  /** The real profile cannot be written to disk (storage blocked or full): XP lives in memory until the page closes, and the status says so. */
+  const unsaved = () => kit.store.durable === false && kit.store.kind !== "memory";
 
   // ---------------------------------------------------------------------------------------------- screens
   function layout() {
     const s = S(), running = !!s.clock?.running, hasRounds = s.rounds.length > 0;
     const graded = !!st.set?.rounds.length;
-    // a session left on the page by the Lab view (or by Forget my data) is not ours to wipe silently: the hero says so before it starts a new one
-    const orphan = hasRounds && !st.set && !running;
-    view.layout({ hero: (!hasRounds && !running) || orphan, stage: running, grade: graded && hasRounds, actions: !running && !!st.set?.done });
+    // a session on the page that the game is not showing (left by the Lab view, by Forget my data, or by anything unexpected) is not ours to wipe
+    // silently, and the Play area must never be blank: the hero says so before it starts a new one
+    const orphan = hasRounds && !running && !graded;
+    view.layout({ hero: (!hasRounds && !running) || orphan, stage: running, grade: graded && hasRounds, actions: !running && !!st.set?.done, recap: !!st.set?.rounds.some((r) => r.punches > 0) });
     if (orphan) view.hint(COPY.hero.sessionOnPage);
+    view.againLabel(againIsCoached() ? COPY.recap.cta.again : COPY.recap.cta.warm);
   }
   function refreshStatus() {
     try {
       const vk = viewKit(), week = weekState();
-      view.renderStatus({ info: vk.xp.info(), week, demo: viewDemo() });
+      view.renderStatus({ info: vk.xp.info(), week, demo: viewDemo(), unsaved: !viewDemo() && unsaved() });
     } catch (e) { warn("status", e); }
   }
   function refreshHero() {
     const first = !firstWin.isDone();
-    view.setHero({ first, coachText: COPY.hero.coach(S().settings.rounds, roundText()), sim: S().sim });
+    view.setHero({ first, coachText: COPY.hero.coach(S().settings.rounds, roundText()), sim: S().sim, ready: sensorsLive() });
   }
   let goalNote = "";
   function refreshSettings() {
@@ -113,6 +116,23 @@ export function createSession({ view, win = globalThis.window, now = () => perfo
   function ensureSensors() {
     if (sensorsLive() || (st.set?.demo && !hasWrist())) { hint(null); return true; }   // a finished Simulate set carries on in Simulate
     hint(COPY.hero.noSensor);
+    view.showHero();
+    return false;
+  }
+
+  // Starting over clears the punches on the page, and with them every label somebody reviewed. The page's own Reset needs two taps for that
+  // reason; so does every control here that would do the same, unless the CSV was exported since the last change.
+  const labelSig = () => { const ps = S().punches; let n = 0; for (const p of ps) if (p.trueType != null && !p.sim) n++; return { punches: ps.length, labelled: n, sig: `${ps.length}:${n}` }; };
+  function disarmClear() { clearTimeout(st.clearArmed); st.clearArmed = null; view.clearWarn(null); }
+  /** True when starting over may go ahead; false (and a warning on screen) when it needs the second tap. */
+  function guardClear() {
+    const s = S();
+    if (!s.rounds.length && !s.clock) return true;                    // nothing on the page to lose
+    const risk = labelSig();
+    if (!risk.labelled || st.exportedSig === risk.sig) { disarmClear(); return true; }
+    if (st.clearArmed) { disarmClear(); return true; }
+    st.clearArmed = setTimeout(disarmClear, 6000);
+    view.clearWarn(COPY.clear.warn(risk.punches, risk.labelled), COPY.clear.again);
     return false;
   }
   /** Start over when a finished or stopped set is still on the page; keeps Simulate on when that is what the person was using. */
@@ -122,23 +142,30 @@ export function createSession({ view, win = globalThis.window, now = () => perfo
     if (s.rounds.length || s.clock) cmd("reset");
     if (wantSim && !S().sim) cmd("sim", { on: true });
   }
-  function startWarmup() {
-    if (S().clock?.running) return;
-    if (!ensureSensors()) return;
-    freshStart();
-    cmd("warmup", { roundMs: WARMUP.roundMs, restMs: WARMUP.restMs, rounds: WARMUP.rounds, warnMs: WARMUP.warnMs });
+  const againIsCoached = () => firstWin.isDone() || (!!st.set && st.set.kind !== "warmup");
+  /** Every way to begin: needs sensors (or Simulate), then the second tap if labels are at stake. Returns false only when it is waiting for that tap. */
+  function begin(run, { sim = false } = {}) {
+    if (S().clock?.running) return true;
+    if (!sim && !ensureSensors()) return true;
+    if (!guardClear()) return false;
+    run();
+    return true;
   }
-  function startCoached() {
-    if (S().clock?.running) return;
-    if (!ensureSensors()) return;
-    freshStart();
-    cmd("rounds");
-  }
+  const runWarmup = () => { freshStart(); cmd("warmup", { roundMs: WARMUP.roundMs, restMs: WARMUP.restMs, rounds: WARMUP.rounds, warnMs: WARMUP.warnMs }); };
+  const runCoached = () => { freshStart(); cmd("rounds"); };
+  const startWarmup = () => begin(runWarmup);
+  const startCoached = () => begin(runCoached);
   const heroAction = () => (firstWin.isDone() ? startCoached() : startWarmup());
+  const againAction = () => (againIsCoached() ? startCoached() : startWarmup());
   function heroSim() {
     if (S().sim) { cmd("sim", { on: false }); return; }
-    cmd("sim", { on: true });
-    heroAction();
+    begin(() => { cmd("sim", { on: true }); (firstWin.isDone() ? runCoached : runWarmup)(); }, { sim: true });
+  }
+  /** The timer card's own Start Rounds, in the Fight view: with no sensor it says what to do instead of running a silent round. */
+  function railStart(e) {
+    if (mode !== "fight" || S().clock?.running || S().rounds.length || sensorsLive()) return;
+    e?.stopImmediatePropagation?.();
+    ensureSensors();
   }
 
   // ---------------------------------------------------------------------------------------------- the bridge
@@ -220,7 +247,7 @@ export function createSession({ view, win = globalThis.window, now = () => perfo
     st.round = {
       n: d.n, startT: d.t, roundMs: d.roundMs, calls: [], call: null, flow: flowStart(), consumed: new Set(), livePb: new Set(), pendingCount: null,
       schedule: set.kind === "warmup" || !callsOn() ? [] : callSchedule({ roundMs: d.roundMs, level, dayKey: day(), roundNumber: d.n }),
-      sawPunch: false, sawCombo: false, comboAnnounced: false,
+      sawPunch: false, sawCombo: false, comboAnnounced: false, count: 0, easeOffered: false,
     };
     app().hooks.simBusy = callBusy;
     view.clearCall();
@@ -229,7 +256,10 @@ export function createSession({ view, win = globalThis.window, now = () => perfo
     view.flow(FLOW.min, false);
     view.coach(set.kind === "warmup" ? COPY.coachMarks.start : !callsOn() ? COPY.call.off : COPY.call.ready);
     view.lastNote(null); view.tier(null);
+    view.stageTally(0); view.stageProgress(0); view.easeOffer(false);
+    view.beats(set.kind === "warmup" && firstWin.state().active ? { punch: false, combo: false, bell: false } : null);
     layout();
+    view.showStage();                                  // the stage is where the eyes need to be: bring it to the top of the screen
     if (!st.ticker) startTicker();
     refreshStatus();
     view.announce(set.kind === "warmup" ? COPY.coachMarks.start : `Round ${d.n} of ${d.total}.`);
@@ -264,9 +294,14 @@ export function createSession({ view, win = globalThis.window, now = () => perfo
     if (!set || mode !== "fight") return;
     const t = now();
     const ph = s.clock ? s.clock.phaseAt(t) : null;
-    if (ph) { setStagePhase(ph); view.stageTime(core().fmtClock(ph.remainingMs)); }
+    if (ph) { setStagePhase(ph); view.stageTime(core().fmtClock(ph.remainingMs)); if (r && ph.phase === "round" && ph.phaseMs) view.stageProgress(ph.elapsedMs / ph.phaseMs); }
     if (!r) return;
     const elapsed = t - r.startT;
+    // a round whose speed has fallen by more than a quarter offers to stop, once, in the coach line and on the Stop button (never a rule: the round carries on)
+    if (!r.easeOffered && ph?.phase === "round" && elapsed > r.roundMs * 0.4 && r.count >= 12) {
+      const fade = fadePct(S().punches.filter((p) => p.round === r.n));
+      if (fade != null && fade > FADE_STOP_PCT) { r.easeOffered = true; view.easeOffer(true); view.coach(COPY.call.easeOffer); view.announce(COPY.call.easeOffer); }
+    }
     if (r.call) {
       const c = r.call, ws = windowState(c, lastPunches(), t);
       const spoken = Math.min(c.nums.length, Math.floor((t - c.at) / CALL.countGapMs) + 1);
@@ -304,6 +339,7 @@ export function createSession({ view, win = globalThis.window, now = () => perfo
     r.call = { id: r.calls.length + 1, str: item.call, nums, at: t };
     const names = nums.map((n) => core().TYPE_NAMES[n]).join(" · ");
     view.showCall({ nums, names });
+    view.reveal("call-banner");                        // a call is the one moment that cannot wait for a scroll
     view.stamp(null); view.countIt(false); r.pendingCount = null;
     view.coach(COPY.call.throw(names));
     cel.readout("callBlip");
@@ -335,11 +371,16 @@ export function createSession({ view, win = globalThis.window, now = () => perfo
       const used = r.calls.filter((x) => x.counted).length;
       r.pendingCount = entry;
       view.countIt(true, { text: COPY.call.read(j.read || "nothing", c.str), enabled: used < XP.countItMax });
+      view.reveal("btn-countit");
     }
     view.coach(COPY.call.next);
   }
 
-  /** "Count it": the hands were right and the sensor read other types. It counts the combo (a flat +3, the same as a Good, whatever the labels do) and, outside Simulate, saves the types you called as the corrected labels. */
+  /**
+   * "Count it": the hands were right and the sensor read other types. It counts the combo for a flat +3, the same as a Good, and nothing else:
+   * it never touches a punch's label. Labels are changed only by somebody reviewing them in the Punch Log (a flat 1 XP whether the choice
+   * agrees or not), so no tap here pays more for saying the sensor was wrong.
+   */
   function countIt() {
     const r = st.round ?? null;
     const entry = r?.pendingCount;
@@ -347,11 +388,6 @@ export function createSession({ view, win = globalThis.window, now = () => perfo
     if (r.calls.filter((x) => x.counted).length >= XP.countItMax) { view.countIt(true, { text: COPY.call.countItLimit, enabled: false }); return; }
     entry.counted = true;
     stats.count("countit.tap");
-    if (!S().sim) {
-      let n = 0;
-      entry.chain.forEach((p, i) => { if (readNum(p) !== entry.nums[i] && p.trueType == null) { p.trueType = TYPE_FOR_NUM[entry.nums[i]]; n++; } });
-      if (n) { cmd("refresh"); cmd("log", { text: `Count it ${entry.call}: ${n} punch label${n === 1 ? "" : "s"} corrected to what you called.`, cls: "ok" }); }
-    }
     view.countIt(true, { text: COPY.call.counted, enabled: false, counted: true });
     view.announce(`${COPY.call.counted}.`);
   }
@@ -363,14 +399,18 @@ export function createSession({ view, win = globalThis.window, now = () => perfo
     view.punchPop(p.type);
     cel.punchSound(p.type);
     if (!r || !set) return;
+    r.count++;
+    view.stageTally(r.count);
     // coach marks and the first-win beats
     const warm = set.kind === "warmup";
-    if (!r.sawPunch) { r.sawPunch = true; if (firstWin.state().active) firstWin.event("punch"); if (warm) view.coach(COPY.coachMarks.punch); }
+    const steps = () => warm && firstWin.state().active && view.beats({ punch: r.sawPunch, combo: r.sawCombo, bell: false });
+    if (!r.sawPunch) { r.sawPunch = true; if (firstWin.state().active) firstWin.event("punch"); if (warm) view.coach(COPY.coachMarks.punch); steps(); }
     const prev = s.punches[s.punches.length - 2];
     if (prev && prev.round === p.round && p.startT - prev.t <= CALL.chainGapMs && !r.sawCombo) {
       r.sawCombo = true;
       if (firstWin.state().active) firstWin.event("combo");
       if (warm) view.coach(COPY.coachMarks.combo);
+      steps();
     }
     // speed tier and bests: only after the warm-up gate, and only against a best you already have
     const open = speedGateOpen({ t: p.startT, setStartT: set.startedAt, warmup: warm });
@@ -407,16 +447,19 @@ export function createSession({ view, win = globalThis.window, now = () => perfo
     const startT = r.startT, endT = Math.max(d.t, startT + 1);
     const completedFrac = Math.min(1, (endT - startT) / roundMs);
     const finished = !d.stopped && completedFrac >= XP.completeFrac;
+    const longRound = warm || roundMs >= XP.minRoundMs;              // a round under a minute is a drill: no round, Strong Finish or session bonus, no weekly ring
     const combos = c.groupCombos(punches, c.DEFAULTS.comboGapMs);
     const freeList = combos.filter((x) => x.len >= 2 && x.punches.every((p) => !r.consumed.has(p.n)));
     const free = freeList.length;
     const grade = roundGrade({ punches, calls: r.calls, startT, endT, roundMs, warmup: warm, flowPeak: r.flow.peak });
     const roundsToday = roundsOnDay(set.kit.store.get(ROUNDS_KEY, null), day());
-    const fullSession = finished && !warm && set.finished + 1 === set.total && d.n === set.total;
-    const xp = roundXp({ warmup: warm, completedFrac, punches: punches.length, freeCombos: free, calls: r.calls, strongFinish: grade.strong, fullSession, roundsToday });
+    const fullSession = finished && !warm && longRound && set.finished + 1 === set.total && d.n === set.total;
+    const xp = roundXp({ warmup: warm, completedFrac, punches: punches.length, freeCombos: free, calls: r.calls, strongFinish: grade.strong, fullSession, roundsToday, roundMs });
 
+    // the first win is the warm-up played: the clock ran out AND the sensor read enough punches for it to be a round (a bell with nothing thrown is not a win)
+    const warmWon = warm && finished && punches.length >= XP.minPunches;
     let justWon = false;
-    if (warm && finished) { const was = firstWin.isDone(); firstWin.event("warmup.done"); justWon = !was && firstWin.isDone(); }
+    if (warmWon) { const was = firstWin.isDone(); firstWin.event("warmup.done"); justWon = !was && firstWin.isDone(); }
     if (justWon) { set.won = true; stats.count("first.win"); stats.firstWin(firstWin.state().timeToWinMs); }
 
     const bundle = {
@@ -430,8 +473,8 @@ export function createSession({ view, win = globalThis.window, now = () => perfo
       try {
         const first = ["punch"];
         if (combos.some((x) => x.len >= 2)) first.push("combo");
-        if (warm && finished) first.push("warmup");
-        if (!warm && finished) first.push("round");
+        if (warmWon) first.push("warmup");
+        if (!warm && finished && longRound) first.push("round");
         if (fullSession) first.push("session");
         if (r.calls.some((x) => ["good", "great", "perfect"].includes(x.judgment) || (x.judgment === "count" && x.counted))) first.push("called");
         if (r.calls.some((x) => x.judgment === "perfect")) first.push("perfect");
@@ -457,7 +500,7 @@ export function createSession({ view, win = globalThis.window, now = () => perfo
           const longest = Math.max(0, ...combos.map((x) => x.len));
           if (longest >= 2) metrics.longestChain = longest;
         }
-        const ring = !warm && finished && !set.ringCounted;
+        const ring = !warm && finished && longRound && !set.ringCounted;
         const extraXp = justWon && !set.demo ? [{ amount: XP.welcome, key: "welcome", once: true, source: "welcome", label: "Welcome Bonus" }] : [];
         const outcome = set.kit.completeSession({
           id: `${set.id}:r${r.n}`, at: wall(), durationMs: Math.round(endT - startT), baseXp: xp.total, metrics,
@@ -470,24 +513,37 @@ export function createSession({ view, win = globalThis.window, now = () => perfo
         bundle.outcome = outcome;
         bundle.xp = outcome.xp?.gained ?? xp.total;
         bundle.levelUp = !!outcome.xp?.levelUp;
-        set.celebration = cel.celebrateOutcome({ outcome });
+        bundle.softened = !!outcome.xp?.applied?.some((a) => a.softened);
+        set.celebration = cel.celebrateOutcome({ outcome, demo: set.demo });
       } catch (e) { warn("round", e); bundle.xp = xp.total; }
     }
     if (finished) set.finished++;
     stats.count("round.done");
-    if (warm && finished) stats.count("warmup.done");
+    if (warmWon) stats.count("warmup.done");
     set.rounds.push(bundle);
 
     const fresh = bundle.added ?? [];
-    const note = [xp.fullDay ? COPY.grade.day : grade.fadeBig ? COPY.grade.fade : !punches.length ? COPY.grade.empty : "", fresh.length ? COPY.book.fresh(fresh.map((a) => a.name ?? a.str).join(", ")) : ""].filter(Boolean).join(" ");
+    const note = [
+      xp.fullDay ? COPY.grade.day : grade.fadeBig ? COPY.grade.fade : punches.length && warm && finished && !warmWon ? COPY.grade.few : "",         // an empty round says so once, in the grade line
+      bundle.softened && !xp.fullDay ? COPY.grade.softCap(XP.dayCap) : "",                // the soft cap shrinks a reward silently otherwise
+      xp.short ? COPY.grade.short : "",
+      fresh.length ? COPY.book.fresh(fresh.map((a) => a.name ?? a.str).join(", ")) : "",
+      set.demo ? COPY.grade.demo : "",                                                   // the demo profile's XP and level are not the saved ones
+    ].filter(Boolean).join(" ");
     if (fresh.some((a) => a.hidden)) cel.readout("alphabet");
     refreshBook(new Set(fresh.map((a) => a.str)));
     refreshPb();
     const { calls: callsPts, pace: pacePts, ...rest } = grade.parts;          // calls count in a called round, pace in free work: show the one that applies
-    view.gradeCard({ grade: grade.grade, score: grade.score, xp: bundle.xp, strong: grade.strong, warmup: warm, empty: !punches.length, parts: grade.mode === "called" ? { calls: callsPts, ...rest } : { pace: pacePts, ...rest }, note });
+    const winSecs = justWon ? Math.round((firstWin.state().timeToWinMs ?? 0) / 100) / 10 : null;
+    view.gradeCard({
+      grade: grade.grade, score: grade.score, xp: bundle.xp, strong: grade.strong, warmup: warm, empty: !punches.length, parts: grade.mode === "called" ? { calls: callsPts, ...rest } : { pace: pacePts, ...rest }, note,
+      ...(justWon ? { ribbon: COPY.grade.firstWin(winSecs), line: COPY.grade.firstWinLine } : {}),
+    });
     cel.readout("gradeSlam");
     if (grade.strong) cel.buzz("perfect");
-    if (justWon) view.coach(COPY.coachMarks.won);
+    // the coach line never carries a stale cue past the bell
+    view.coach(justWon ? COPY.coachMarks.won : warm && finished && !warmWon ? (punches.length ? COPY.coachMarks.few(punches.length) : COPY.coachMarks.empty) : "");
+    view.easeOffer(false); view.beats(null);
     st.round = null;
     app().hooks.simBusy = null;
     refreshStatus(); refreshSettings(); layout();
@@ -501,7 +557,8 @@ export function createSession({ view, win = globalThis.window, now = () => perfo
     stopTicker();
     layout();
     view.setStage({ phase: reason === "done" ? "Done" : "Stopped", callsOn: false, running: false });
-    if (!set.rounds.length) return;
+    if (reason === "stopped") view.coach(COPY.call.stopped);
+    if (!set.rounds.length || set.rounds.every((r) => !r.punches)) return;     // nothing was read, so there is nothing to recap
     try { await set.celebration; } catch { /* the recap still opens */ }
     if (st.set !== set) return;                      // reset while the celebration played
     openRecap(set);
@@ -529,11 +586,24 @@ export function createSession({ view, win = globalThis.window, now = () => perfo
     };
   }
 
+  /**
+   * The first date a weekly event on `day` (0 = Sunday) at `time` can start: today only if that is the day and the time has not passed. The kit
+   * writes DTSTART from startDate and repeats on the chosen weekday, so a start date of "today" would add a stray one-off event today.
+   */
+  function nextWeekday(day, time) {
+    const d = new Date(wall()), [hh, mm] = time.split(":").map(Number);
+    const ahead = (day - d.getDay() + 7) % 7;
+    const laterToday = ahead === 0 && (hh > d.getHours() || (hh === d.getHours() && mm > d.getMinutes()));
+    d.setDate(d.getDate() + (ahead === 0 && !laterToday ? 7 : ahead));
+    const pad = (n) => String(n).padStart(2, "0");
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+  }
+
   /** A weekly calendar event the person downloads, at a day and time they pick. The calendar app does the reminding; nothing is sent. */
   function addReminder({ day, time } = {}) {
     if (!/^\d{1,2}:\d{2}$/.test(time ?? "") || !(day >= 0 && day <= 6)) { view.recapNote(COPY.reminder.bad); return null; }
     try {
-      const ics = buildReminderIcs({ title: COPY.reminder.title, description: COPY.reminder.description, time, days: [day], startDate: dayKey(wall(), DAY_OPTS), appName: "bag-work" });
+      const ics = buildReminderIcs({ title: COPY.reminder.title, description: COPY.reminder.description, time, days: [day], startDate: nextWeekday(day, time), appName: "bag-work" });
       download(ics, "bag-work-session.ics", { doc: win.document, urlApi: win.URL });
       view.recapNote(COPY.reminder.done(COPY.reminder.days[day], time));
       return ics;
@@ -545,12 +615,13 @@ export function createSession({ view, win = globalThis.window, now = () => perfo
     const { cards, info } = setBundle(set);
     stats.count("recap.opened");
     const warmOnly = set.kind === "warmup";
+    const next = againIsCoached();
     view.reminder({ days: COPY.reminder.days, day: (new Date(wall()).getDay() + 2) % 7, onAdd: addReminder });
     return view.recap({
       cards, xpInfo: info,
-      cta: { label: warmOnly ? COPY.recap.ctaCoach(S().settings.rounds, roundText()) : COPY.recap.cta.again },
+      cta: { label: warmOnly ? (next ? COPY.recap.ctaCoach(S().settings.rounds, roundText()) : COPY.recap.cta.warm) : COPY.recap.cta.again },
       ask: shouldAsk(), note: COPY.recap.cleared,
-      onCta: () => startCoached(),
+      onCta: () => againAction(),
       onExport: () => win.document.getElementById("btn-export")?.click(),
       onFeedback: (c) => feedback(c),
     });
@@ -582,6 +653,8 @@ export function createSession({ view, win = globalThis.window, now = () => perfo
       return;
     }
     clearTimeout(st.forgetArmed); st.forgetArmed = null;
+    if (S().clock?.running) cmd("stop");               // a round in progress ends through the normal events first: it must not be left running with no game behind it
+    disarmClear();
     kit.reset(); dropDemo(); prefsStore.forget();
     prefs = prefsStore.load();
     applyPrefs();
@@ -616,6 +689,12 @@ export function createSession({ view, win = globalThis.window, now = () => perfo
   function setMode(m) {
     const next = m === "lab" ? "lab" : "fight";
     if (next === mode) return;
+    if (S().clock?.running) {                           // the game and the page's clock must stay in step: no view switch while a set runs, and the screen says why
+      const text = COPY.mode.busy(next);
+      if (mode === "fight") view.coach(text); else cmd("log", { text, cls: "warn" });
+      view.announce(text);
+      return;
+    }
     mode = next;
     prefsStore.saveMode(next);
     view.mode(next);
@@ -634,13 +713,16 @@ export function createSession({ view, win = globalThis.window, now = () => perfo
     cel.armSound();
     view.bind({
       hero: heroAction, sim: heroSim, warm: () => startWarmup(), stop: () => cmd("stop"), voice: () => setting("voice", prefs.voice === "on" ? "off" : "on"),
-      countIt, recap: () => openRecap(), again: () => startCoached(),
+      countIt, recap: () => openRecap(), again: againAction, rounds: railStart,
       lab: () => view.lab(win.document.documentElement.dataset.lab !== "open"),
       setup: () => view.setup(win.document.documentElement.dataset.setup !== "open"),
       forget, statsCsv, mode: setMode, setting, feedback, goal: setGoal,
     });
     view.mode(mode); view.lab(false); view.setup(false);
     applyPrefs();
+    // a CSV the person just exported is a copy of what a fresh start would clear
+    try { win.document?.getElementById?.("btn-export")?.addEventListener?.("click", () => { st.exportedSig = labelSig().sig; disarmClear(); }); } catch { /* no page */ }
+    if (unsaved()) view.announce(COPY.chip.unsaved);
     try { win.matchMedia?.("(prefers-color-scheme: light)").addEventListener?.("change", () => { if (prefs.theme === "auto") resolveTheme(); }); } catch { /* an old browser */ }
     win.addEventListener("bwfun", (e) => { try { onEvent(e.detail || {}); } catch (err) { warn(e.detail?.type ?? "event", err); } });
     refreshAll();
@@ -649,6 +731,6 @@ export function createSession({ view, win = globalThis.window, now = () => perfo
     return api;
   }
 
-  const api = { start, startWarmup, startCoached, openRecap, setting, setMode, feedback, forget, stats, firstWin, countIt, onEvent, addReminder, setGoal, dispose() { stopTicker(); clearTimeout(st.forgetArmed); st.forgetArmed = null; cel.hush(); }, _tick: tick, _state: st };
+  const api = { start, startWarmup, startCoached, again: againAction, railStart, openRecap, setting, setMode, feedback, forget, stats, firstWin, countIt, onEvent, addReminder, setGoal, dispose() { stopTicker(); clearTimeout(st.forgetArmed); st.forgetArmed = null; clearTimeout(st.clearArmed); st.clearArmed = null; cel.hush(); }, _tick: tick, _state: st };
   return api;
 }

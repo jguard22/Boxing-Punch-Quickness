@@ -84,20 +84,28 @@ punches), and mean weight shift.
 The page opens in **Fight view**: a rhythm game for your heavy bag. The coach calls a combo ("1-2-3"), you throw it, the bell keeps score.
 Everything the page did before is still there: **Lab** in the header switches to the original page (every card, table and export),
 **Setup** holds the sensor, Simulate, export and reset controls, and **Show lab details** opens the tables under the live cards.
-`?mode=lab` shows the lab view for one visit, `?fun=0` turns the fun layer off entirely (nothing of it is even fetched and no storage is touched).
+`?mode=lab` shows the lab view for one visit, `?fun=0` turns the fun layer off entirely: the layer's modules (`src/fun/start.js` and everything it imports) are never fetched and no storage is touched.
+The page still loads the six-line `boot.js` and the two stylesheets (`fun.css`, `fun-kit.css`), which stay inert in the lab look. The view cannot be switched while a set is running (the game and the page's clock must stay in step); the screen says so.
 
 - **First win in 30 seconds, no setup.** *Start 30-second warm-up* (or *Simulate (no sensors)*, which starts Simulate and the warm-up in one tap) runs a
   30 s round: the first punch pops with its type and speed, a chain forms a combo string, and at the bell the Round Grade stamp lands, XP counts up and
-  Level 2 opens. The time is measured with `createFirstWin().state().timeToWinMs`. Nothing asks for a name, an account or a permission.
+  Level 2 opens (the first warm-up pays 57 to 65 XP; Level 3 starts at 90). While it runs the stage shows a progress bar, a punch tally and three steps (First punch, First combo,
+  Warm-up bell) that tick off, all quiet: nothing plays or celebrates mid-round. The first win needs the clock to run out *and* at least five punches read: a bell with nothing thrown is
+  graded "No punches were read", is not a win, and leaves the Welcome Bonus unspent. The time is measured with `createFirstWin().state().timeToWinMs`. Nothing asks for a name, an account or a permission.
+  With no sensor connected the teal button is Simulate, the button that works right now; the timer card's own *Start Rounds* says what to do instead of running a silent round.
 - **Coach Calls.** After the warm-up, rounds call combos in boxing numbers (stage 1: `1`, `1-2`; stage 2 at Level 2; hooks at 3; uppercuts at 5; four punches
   at 6; stage 5 at 8). A call opens a window (2.5 s after the last spoken count, or 600 ms after your last punch). Judgments, always shape plus word:
   **Perfect** (right hands, every type, gaps 450 ms or less, first punch within 1.2 s), **Great**, **Good** (one type different), **Count it?**
-  (right hands, the sensor read other types: one tap counts it for a flat +3 XP and, outside Simulate, saves what you called as the corrected labels)
+  (right hands, the sensor read other types: one tap counts the combo for a flat +3 XP, the same as a Good, and never touches a label: labels change only when somebody reviews them in the Punch Log)
   and **Missed**. The judge never fails a combo for the classifier's mistake. **Flow** x1 to x5 rises on Perfect or Great in a row and drops silently.
+  A round whose speed has fallen by more than a quarter offers to stop (the coach line, and the Stop button reads "Stop here"); it never stops the round for you.
 - **Round Grade** (Warm-up, Solid, Sharp, Fire; the warm-up round is always Warm-up): calls 40 (pace control 40 in free work), rhythm 35,
-  finish 10, both hands 15. **Strong Finish** compares the last 30 s with the round's own mean speed, never in the warm-up, never after a fade over 25 percent.
+  finish 10, both hands 15. In a round with coach calls the rhythm, finish and hands parts only count in proportion to how the calls went (half with none answered, all with every call
+  Perfect), so throwing a steady 1-2 and ignoring the coach tops out at 30 and grades Warm-up. **Strong Finish** compares the last 30 s with the round's own mean speed, never in the warm-up, never after a fade over 25 percent.
 - **XP** comes from rounds, calls and free combos only: free combo +2 (5 a round), called combo +3 / +5 / +8, round +15 (warm-up +10), Strong Finish +10,
-  full session +25. No XP per punch, no XP for relabelling or confirming a label, 12 rounds a day (then 1 XP a round), a 200 XP soft cap a day.
+  full session +25. No XP per punch, no XP for relabelling or confirming a label, 12 rounds a day (then 1 XP a round), a 200 XP soft cap a day (past it a round pays a quarter, and the grade card says so).
+  A round under a minute is a drill: no round, Strong Finish or session bonus, no weekly ring tick, and a free-combo cap that shrinks with the round (the 30-second warm-up keeps its own table).
+  Levels cost 30, 60, 100, 160, 240, 330, 440 ... XP (kit curve in `config.js`), so the call ladder up to Level 8 (1,360 XP) is a couple of weeks of three sessions a week.
 - **Speed tiers** (Snap, Sharp, Steady, Easy) and speed bests exist only after the first minute of a session and never in the warm-up round.
   Speeds are stored in m/s and shown as m/s or mph (the header switch) everywhere.
 - **Combo Book.** Appears after your first combo: eleven named pages (One-Two, Classic, Four Count, Up and Over, Corkscrew ...) and a hidden Alphabet page (`1-2-3-4-5-6` in one chain),
@@ -105,12 +113,15 @@ Everything the page did before is still there: **Lab** in the header switches to
 - **Personal bests** (card appears after your first scored round): top hand speed per punch type, best Round Grade, best Flow, longest chain. Speeds are stored in m/s and shown in your unit.
 - **Label Lab.** Reviewing a punch's label in the Punch Log pays a flat 1 XP (20 a session, once per punch). It pays the same whether you changed the auto label or confirmed it, *Mark all unreviewed
   correct* and Simulate pay nothing, and no reward anywhere depends on agreeing or disagreeing with the auto label.
+- **Starting over asks twice when it would lose work.** Play again, the recap's button and the hero clear the punches on the page; if any of them carries a label somebody reviewed (not the
+  simulator's own) and the CSV has not been exported since, the first tap only warns ("Tap again to clear") and the second goes ahead. Exporting disarms it.
 - **Recap** (three cards: Rounds, Combo highlight, Up next; a fourth, Label Lab, once something was reviewed), with *Add my next session to my calendar* (a weekly `.ics` at the day and time you pick; nothing is sent) after every set, with a one-tap *Loved it / Fine / Not for me* that stays on this device with the first-win time.
-- **Simulate is a demo.** It runs on a second kit instance on memory storage: nothing it earns is saved except the one-time Welcome Bonus (+40 XP).
+- **Simulate is a demo.** It runs on a second kit instance on memory storage: nothing it earns is saved except the one-time Welcome Bonus (+15 XP). Its grade card, level-up modal and status chip all say the XP and level belong to the demo.
   The simulated boxer answers calls with a mix of exact, late, wrong-order and short throws so every judgment shows up.
 - **Weekly ring.** Three sessions a week by default (a full, non-warm-up round starts a session; only the first full round of a sitting counts), 1 to 5 in Settings. Lowering starts now, raising next week, and past weeks keep the goal they were played under. A lapse is a welcome-back with a bonus, never a loss.
 - **Settings** (all local): motion (follow the device, reduced, full), sounds, coach voice (off by default), coach calls, light / dark, the feedback tap,
-  fun stats (counts only, CSV) and **Forget my data** (`kit.reset()`).
+  fun stats (counts only, CSV) and **Forget my data** (`kit.reset()`; a round in progress is stopped first). If the browser blocks storage the layer still runs on memory and the status says XP is kept only until the page closes.
+- **On a phone** the status card and the header extras step aside while a round runs, the stage scrolls to the top when a round starts, and a call opening while you are scrolled elsewhere brings itself on screen.
 - **Guardrails.** Bag and pad work only: copy never says damage, knockout, power or force. No haptics are sent in this build (TODO[SDK]); the rule is tested:
   never inside a punch window or within 350 ms of an onset. Celebrations (confetti, toasts, level-up) wait behind one quiet gate while a round runs.
   Sounds and speech are optional and every cue has words and a shape on screen. Nothing loops or flashes; reduced motion removes all movement.

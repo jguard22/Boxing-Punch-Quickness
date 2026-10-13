@@ -168,7 +168,7 @@ try {
   const fw = await page.evaluate(() => window.__bwFun.firstWin.state());
   check(fw.done && fw.timeToWinMs < 60000, `createFirstWin().state().timeToWinMs = ${fw.timeToWinMs} ms (under 60 s)`);
   const xp = await page.evaluate(() => ({ real: window.__bwFun.kit.xp.info(), demo: window.__bwFun.getDemoKit().xp.info(), keys: Object.keys(localStorage).filter((k) => k.startsWith("fk:boxing-demo:")) }));
-  check(xp.demo.level >= 2 && xp.real.total === 40, `demo profile reached Level ${xp.demo.level}; the real profile kept only the Welcome Bonus (${xp.real.total} XP)`);
+  check(xp.demo.level >= 2 && xp.real.total === 15, `demo profile reached Level ${xp.demo.level}; the real profile kept only the Welcome Bonus (${xp.real.total} XP)`);
   check(!xp.keys.some((k) => /badges|streak|pb$/.test(k)), "no demo badge, streak or best was saved");
   check(await visible(page, "#ics-box"), "the recap offers Add my next session (a downloadable calendar file)");
   check(await page.evaluate(() => !document.getElementById("card-book").hidden && document.querySelectorAll("#book-list .book-page").length >= 11), "the Combo Book appears after the first combo, with its named pages");
@@ -246,6 +246,31 @@ try {
     await dismissModal(page2);
     await page2.screenshot({ path: path.join(OUT, "08-light-reduced.png"), fullPage: false });
     await page2.context().close();
+  }
+
+  // ---- E: a small phone (375 x 667) during a round: the view is locked mid-set, the stage is on top, the chrome steps aside, Count it fits on screen
+  {
+    const p3 = await newPage({ viewport: { width: 375, height: 667 } });
+    await p3.goto(`${PAGE}?round=0.5&rest=0.05&rounds=1`);
+    await ready(p3);
+    check(await p3.$eval("#hero-sim", (e) => e.classList.contains("primary")) && !(await p3.$eval("#hero-warmup", (e) => e.classList.contains("primary"))), "no sensor: Simulate is the teal button, not a button that only shows a hint");
+    await p3.evaluate(() => window.__bwFun.kit.store.set("firstwin", { startedAt: 1, index: 3, beatAt: 1, doneAt: 2, nudged: [], assisted: false, timeToWinMs: 1 }));
+    await p3.reload(); await ready(p3);
+    await p3.click("#hero-sim");
+    await p3.waitForFunction(() => !document.getElementById("call-banner").hidden, null, { timeout: 20000 });
+    await p3.waitForTimeout(300);
+    const geo = await p3.evaluate(() => {
+      const r = (id) => document.getElementById(id).getBoundingClientRect();
+      document.getElementById("countit").hidden = false;               // the panel a "Count it?" call shows, forced on to measure where its button sits
+      const stamp = document.getElementById("call-stamp"); stamp.hidden = false; stamp.innerHTML = "<span>Count it?</span><span class='why'>Right hands. The sensor read other types.</span>";
+      return { stageTop: r("fun-stage").top, digits: r("call-digits").bottom, btn: r("btn-countit").bottom, vh: innerHeight, status: !!document.getElementById("fun-status").getClientRects().length };
+    });
+    check(geo.stageTop < 90 && !geo.status, `the stage is on top and the level bar steps aside (stage at ${Math.round(geo.stageTop)} px)`);
+    check(geo.digits < geo.vh && geo.btn < geo.vh, `the call and the Count it button are on screen (${Math.round(geo.btn)} of ${geo.vh} px)`);
+    await p3.evaluate(() => document.querySelector('#mode-seg button[data-mode="lab"]').click());
+    check(await p3.evaluate(() => document.documentElement.dataset.mode === "fight") && (await txt(p3, "#coach-line")).includes("A set is running"), "Lab is locked mid-set, and the screen says why");
+    await p3.screenshot({ path: path.join(OUT, "09-phone-call.png"), fullPage: false });
+    await p3.context().close();
   }
 } catch (e) {
   failures.push(`exception: ${e.message}`);
