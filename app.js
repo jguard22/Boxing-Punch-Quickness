@@ -24,6 +24,8 @@
     rounds: [],                  // [{n, startT, endT|null}]
     clock: null, sessionDone: false,
     settings: { roundMin: 3, restMin: 1, rounds: 3 },
+    persisted: { roundMin: 3, restMin: 1, rounds: 3 },   // what localStorage holds (URL overrides never land here)
+    urlKeys: new Set(),                                  // settings currently overridden by ?round= / ?rest= / ?rounds=
     bell: true,
     go: { armed: false, at: null, timer: null, best: null },
     insole: { buf: [], load: { left: 0, right: 0 }, last: { left: -Infinity, right: -Infinity } },
@@ -53,14 +55,21 @@
       if (p.settings) Object.assign(S.settings, p.settings);
       if (typeof p.bell === "boolean") S.bell = p.bell;
     } catch { /* storage unavailable */ }
-    const q = new URLSearchParams(location.search);       // ?round=0.15&rest=0.05&rounds=3&unit=mph (handy for demos / tests)
-    if (q.get("round")) S.settings.roundMin = Number(q.get("round"));
-    if (q.get("rest")) S.settings.restMin = Number(q.get("rest"));
-    if (q.get("rounds")) S.settings.rounds = Number(q.get("rounds"));
+    S.persisted = { ...S.settings };
+    // ?round=0.15&rest=0.05&rounds=3&unit=mph (handy for demos / tests). Timer overrides apply to
+    // this page load only: they are never written to localStorage, so a demo link cannot change
+    // the defaults you get next time. Editing the field on the page makes it yours (see below).
+    const q = new URLSearchParams(location.search);
+    for (const [param, key] of [["round", "roundMin"], ["rest", "restMin"], ["rounds", "rounds"]]) {
+      if (q.get(param)) { S.settings[key] = Number(q.get(param)); S.urlKeys.add(key); }
+    }
     if (q.get("unit") === "mph" || q.get("unit") === "ms") S.unit = q.get("unit");
   }
   function savePrefs() {
-    try { localStorage.setItem(PREF_KEY, JSON.stringify({ unit: S.unit, settings: S.settings, bell: S.bell })); } catch { /* ignore */ }
+    const settings = { ...S.settings };
+    for (const k of S.urlKeys) settings[k] = S.persisted[k];
+    S.persisted = settings;
+    try { localStorage.setItem(PREF_KEY, JSON.stringify({ unit: S.unit, settings, bell: S.bell })); } catch { /* ignore */ }
   }
 
   // ---------- detection → punch records ----------
@@ -110,6 +119,7 @@
 
   // ---------- rendering ----------
   let session = null;
+  const buildSess = (nowT = now()) => C.buildSession(S.punches, S.rounds, nowT, { roundMs: S.clock?.cfg.roundMs });
   const effType = C.effType;
 
   function renderUnits() {
@@ -123,7 +133,7 @@
 
   function renderAll() {
     S.combos = C.annotateCombos(S.punches, CFG.comboGapMs);
-    session = C.buildSession(S.punches, S.rounds, now());
+    session = buildSess();
     renderLive();
     renderCombos();
     renderWeight();
@@ -132,7 +142,7 @@
   }
   // the parts that also change with the clock (open round duration)
   function renderStats() {
-    if (!session || S.tick % 10 === 0) session = C.buildSession(S.punches, S.rounds, now());
+    if (!session || S.tick % 10 === 0) session = buildSess();
     renderRounds();
     renderFatigue();
     renderConfusion();
@@ -245,8 +255,10 @@
   function renderFatigue() {
     const f = session.fatigue, wrap = $("fx-wrap");
     if (!f) {
-      wrap.innerHTML = `<div class="empty fx-empty">Run two or more rounds (3+ punches each) to draw the fatigue curve.</div>`;
-      $("fx-tag").textContent = "% of first round";
+      wrap.innerHTML = `<div class="empty fx-empty">${session.openRound != null
+        ? `Round ${session.openRound} is in progress — the curve compares completed rounds, so it appears once two have finished.`
+        : "Run two or more full rounds (3+ punches each) to draw the fatigue curve."}</div>`;
+      $("fx-tag").textContent = session.openRound != null ? "round in progress" : "% of first round";
       return;
     }
     const W = 560, H = 220, pad = { l: 42, r: 22, t: 22, b: 30 };
@@ -265,7 +277,7 @@
     wrap.innerHTML = `<svg class="fx" viewBox="0 0 ${W} ${H}" role="img" aria-label="Fatigue curve: hand speed and punches per minute by round, percent of first round" preserveAspectRatio="xMidYMid meet">
       ${grid}<line class="base" x1="${pad.l}" x2="${W - pad.r}" y1="${y(100)}" y2="${y(100)}"/>
       ${line("ratePct", "l-rate")}${line("speedPct", "l-speed")}${dots("ratePct", "d-rate", "t-rate", 16)}${dots("speedPct", "d-speed", "t-speed", -9)}${xl}</svg>`;
-    $("fx-tag").textContent = `speed ${sgn(f.speedFadePct)}% · output ${sgn(f.rateFadePct)}%`;
+    $("fx-tag").textContent = `speed ${sgn(f.speedFadePct)}% · output ${sgn(f.rateFadePct)}%${session.fatigueNote ? ` · ${session.fatigueNote}` : ""}`;
   }
 
   function renderConfusion() {
@@ -296,7 +308,7 @@
       k(`${fs(t.meanV)} <span class="unit">${u}</span>`, "mean hand speed", t.peakV ? `peak ${fs(t.peakV)} ${u} · ${t.peakType}` : null),
       k(t.combos, "combinations", t.longest ? `longest ${t.longestStr}` : null),
       k(t.count ? `${t.pctL.toFixed(0)} / ${(100 - t.pctL).toFixed(0)}` : "—", "left / right %", t.meanL != null && t.meanR != null ? `speed L ${fs(t.meanL)} · R ${fs(t.meanR)}` : null),
-      k(f ? `${sgn(f.speedFadePct)}%` : "—", "late-round speed", f ? `output ${sgn(f.rateFadePct)}% · R${f.baseRound}→R${f.lastRound}` : "needs 2+ rounds"),
+      k(f ? `${sgn(f.speedFadePct)}%` : "—", "late-round speed", f ? `output ${sgn(f.rateFadePct)}% · R${f.baseRound}→R${f.lastRound}${session.openRound != null ? " · R" + session.openRound + " running" : ""}` : session.fatigueNote),
       k(t.shift.straightMean == null ? "—" : `${sgn(t.shift.straightMean, 1)} <span class="unit">pp</span>`, "weight to front foot", t.shift.n ? `straights · ${t.shift.n} measured` : "no insole data"),
       k(cf.n ? pct(cf.accuracy * 100) : "—", "auto-label match", `${cf.n} reviewed of ${t.count}`),
     ].join("");
@@ -361,7 +373,7 @@
         if (r && r.endT == null) r.endT = ev.t;
         if (ev.type === "roundEnd") bell(ev.n === N ? 3 : 2);
         S.combos = C.annotateCombos(S.punches, CFG.comboGapMs);
-        const rs = C.buildSession(S.punches, S.rounds, ev.t).rounds.find((x) => x.n === ev.n);
+        const rs = buildSess(ev.t).rounds.find((x) => x.n === ev.n);
         if (rs) log(`Round ${ev.n} ${ev.type === "stopped" ? "stopped" : "done"}: ${rs.count} punches, ${rs.perMin == null ? "—" : rs.perMin.toFixed(0)}/min, mean ${fs(rs.meanV)} ${C.speedLabel(S.unit)}, ${rs.combos} combos.`, "ok");
       } else if (ev.type === "restStart") {
         log(`Rest — ${fmtDur(S.settings.restMin * 60000)}.`);
@@ -371,6 +383,9 @@
         if (S.sim) simStop();
       }
       if (ev.type === "stopped") {
+        for (const r of S.rounds) {                          // safety net: no round may stay open after Stop
+          if (r.endT == null) r.endT = Math.min(ev.t, r.startT + S.clock.cfg.roundMs);
+        }
         log("Rounds stopped.", "warn");
         if (S.sim) simStop();
       }
@@ -455,7 +470,7 @@
     log(`Exported ${S.punches.length} punches (m/s, auto + corrected labels, combos, rounds, weight shift).`);
   }
   function exportRoundsCsv() {
-    const sess = C.buildSession(S.punches, S.rounds, now());
+    const sess = buildSess();
     if (!sess.rounds.length) { log("No rounds yet — run the round timer first.", "warn"); return; }
     download(`rounds-${stamp()}.csv`, [C.ROUND_CSV_HEADER, ...sess.rounds.map(C.roundCsvRow)].join("\n"));
     log(`Exported ${sess.rounds.length} rounds (m/s).`);
@@ -589,6 +604,7 @@
     clearInterval(Sim.pump); clearInterval(Sim.insoleTimer);
     for (const id of Sim.timers) clearTimeout(id);
     Sim.timers.clear(); Sim.streams.length = 0; Sim.expect = { L: [], R: [] };
+    detector.reset();                                        // a half-fed punch window must not outlive the stream
     $("btn-sim").classList.remove("connected");
     $("btn-sim").textContent = "Simulate";
     log("Simulate stopped.");
@@ -611,7 +627,7 @@
   // ---------- summary copy ----------
   async function copySummary() {
     const cf = C.confusion(S.punches);
-    const text = C.summaryText(C.buildSession(S.punches, S.rounds, now()), cf, S.unit);
+    const text = C.summaryText(buildSess(), cf, S.unit);
     let ok = false;
     try { await navigator.clipboard.writeText(text); ok = true; } catch {
       try {
@@ -662,7 +678,11 @@
   document.querySelectorAll("#units-seg button").forEach((b) => b.addEventListener("click", () => {
     S.unit = b.dataset.unit; savePrefs(); renderUnits(); renderAll(); renderClock();
   }));
-  for (const id of ["set-round", "set-rest", "set-rounds"]) $(id).addEventListener("change", () => { readSettings(); applySettingsToInputs(); savePrefs(); renderClock(); });
+  const SETTING_KEY = { "set-round": "roundMin", "set-rest": "restMin", "set-rounds": "rounds" };
+  for (const id of ["set-round", "set-rest", "set-rounds"]) $(id).addEventListener("change", () => {
+    S.urlKeys.delete(SETTING_KEY[id]);                   // a value typed on the page is a real preference
+    readSettings(); applySettingsToInputs(); savePrefs(); renderClock();
+  });
   $("set-bell").addEventListener("change", (e) => { S.bell = e.target.checked; savePrefs(); });
   $("btn-confirm-all").addEventListener("click", () => {
     let n = 0;

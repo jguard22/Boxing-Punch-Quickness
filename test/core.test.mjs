@@ -298,3 +298,140 @@ test("coach notes: sport wording, fade and drive callouts", () => {
   assert.ok(!/(diagnos|treat|injur|medical)/i.test(text));
   assert.ok(C.summaryText(sess, C.confusion(P), "ms").includes("R2:"));
 });
+
+// ---------- review fixes ----------
+test("detector: a gap in the stream aborts the open window instead of emitting a ghost punch", () => {
+  const rng = C.mulberry32(11);
+  const det = C.createDetector({});
+  // 90 ms of a straight punch, then the stream dies (BLE dropout / Stop Simulate)
+  const s = C.synthPunch("straight", rng);
+  let first = null;
+  for (const smp of s.samples) {
+    if (smp.ms > 90) break;
+    det.quat("L", smp.q);
+    first = det.acc("L", smp.a, 1000 + smp.ms) || first;
+  }
+  assert.equal(first, null);
+  assert.equal(det.hands.L.active, true, "window open when the stream stops");
+  // 8 s later a clean punch arrives: it must be detected on its own, not swallowed
+  const real = throwPunch(det, "L", "straight", 9000, rng);
+  assert.ok(real.punch, "post-gap punch detected");
+  assert.ok(real.punch.durMs <= 450, `duration ${real.punch.durMs} within the cap`);
+  assert.ok(real.punch.startT >= 9000, `punch starts after the gap (${real.punch.startT})`);
+  assert.ok(real.punch.peakV < 14, `no stale velocity carried over (${real.punch.peakV})`);
+  assert.equal(det.hands.L.aborted, 1);
+});
+
+test("detector: the first sample after a gap can itself start a new window", () => {
+  const det = C.createDetector({});
+  det.acc("L", { x: 0, y: 0, z: 0 }, 100);
+  det.acc("L", { x: 40, y: 0, z: 0 }, 105);              // onset
+  assert.equal(det.hands.L.active, true);
+  det.acc("L", { x: 40, y: 0, z: 0 }, 2000);             // 1.9 s hole, still hard acceleration
+  assert.equal(det.hands.L.active, true);
+  assert.equal(det.hands.L.start, 2000, "fresh window opened at the post-gap sample");
+  assert.equal(det.hands.L.aborted, 1);
+});
+
+test("detector: reset() drops an open window", () => {
+  const det = C.createDetector({});
+  det.acc("L", { x: 0, y: 0, z: 0 }, 100);
+  det.acc("L", { x: 40, y: 0, z: 0 }, 105);
+  det.reset();
+  assert.equal(det.hands.L.active, false);
+  assert.equal(det.hands.L.lastT, null);
+});
+
+test("fatigue curve: open and stopped-early rounds are left out", () => {
+  const mkR = (n, count, meanV, perMin, durMs, open = false) => ({ n, count, meanV, perMin, durMs, open });
+  // R3 still running, 5 punches in a few seconds: would read +260% output / big speed swing
+  const f = C.fatigueCurve([mkR(1, 40, 8, 50, 180000), mkR(2, 38, 7.6, 46, 180000), mkR(3, 5, 4, 180, 4000, true)]);
+  assert.equal(f.lastRound, 2);
+  assert.equal(f.points.length, 2);
+  // stopped at 5 s of a 180 s round: too short even though it is closed
+  const g = C.fatigueCurve([mkR(1, 40, 8, 50, 180000), mkR(2, 38, 7.6, 46, 180000), mkR(3, 4, 9, 180, 5000)], { roundMs: 180000 });
+  assert.equal(g.lastRound, 2);
+  assert.deepEqual(g.skipped.map((r) => r.n), [3]);
+  // a round stopped at 60% of its length still counts
+  const h = C.fatigueCurve([mkR(1, 40, 8, 50, 180000), mkR(2, 25, 7.6, 46, 108000)], { roundMs: 180000 });
+  assert.equal(h.lastRound, 2);
+  // only one complete round -> no curve at all
+  assert.equal(C.fatigueCurve([mkR(1, 40, 8, 50, 180000), mkR(2, 5, 4, 180, 4000, true)]), null);
+  // without a configured length the longest closed round is the yardstick
+  assert.equal(C.fatigueCurve([mkR(1, 40, 8, 50, 180000), mkR(2, 4, 9, 180, 5000)]), null);
+});
+
+test("buildSession: an in-progress round never feeds the fatigue read-out or the notes", () => {
+  const P = [];
+  let n = 0;
+  const mk = (round, startT, v, hand) => P.push(mkPunch({ n: ++n, round, startT, t: startT + 150, peakV: v, hand, type: hand === "L" ? "jab" : "cross" }));
+  for (let i = 0; i < 20; i++) mk(1, i * 3000, 8, i % 2 ? "R" : "L");
+  for (let i = 0; i < 5; i++) mk(2, 60000 + i * 700, 12, i % 2 ? "R" : "L");   // 5 fast punches, 3.5 s into round 2
+  const rounds = [{ n: 1, startT: 0, endT: 60000 }, { n: 2, startT: 60000, endT: null }];
+  const sess = C.buildSession(P, rounds, 63500, { roundMs: 60000 });
+  assert.equal(sess.fatigue, null);
+  assert.equal(sess.fatigueNote, "round in progress");
+  assert.equal(sess.openRound, 2);
+  const text = C.coachNotes(sess, C.confusion(P), "ms").map((x) => x.text).join(" | ");
+  assert.ok(!/Hand speed (faded|eased|rose|held)/.test(text), text);
+  // the same round stopped 3.5 s in is a stub, still excluded
+  const stopped = C.buildSession(P, [rounds[0], { n: 2, startT: 60000, endT: 63500 }], 70000, { roundMs: 60000 });
+  assert.equal(stopped.fatigue, null);
+  assert.equal(stopped.fatigueNote, "needs 2+ full rounds");
+});
+
+test("round clock: Stop before the tick delivered roundEnd still closes the round first", () => {
+  const clk = C.createRoundClock({ roundMs: 10000, restMs: 3000, rounds: 2, warnMs: 10000 });
+  clk.start(0);
+  const evs = clk.stop(10050);                       // no tick between 10000 and the click
+  assert.deepEqual(evs.map((e) => e.type), ["roundEnd", "restStart", "stopped"]);
+  assert.equal(evs[0].t, 10000, "roundEnd keeps its scheduled time");
+  assert.equal(evs[2].phase, "rest");
+  assert.deepEqual(clk.tick(60000), []);
+  // Stop after the whole session ended but before the final tick: events, no 'stopped'
+  const c2 = C.createRoundClock({ roundMs: 1000, restMs: 500, rounds: 1, warnMs: 10000 });
+  c2.start(0);
+  assert.deepEqual(c2.stop(1200).map((e) => e.type), ["roundEnd", "done"]);
+  assert.equal(c2.finished, true);
+  // Stop mid-round is unchanged
+  const c3 = C.createRoundClock({ roundMs: 10000, restMs: 3000, rounds: 2, warnMs: 10000 });
+  c3.start(0);
+  const st = c3.stop(4000);
+  assert.deepEqual(st.map((e) => e.type), ["stopped"]);
+  assert.equal(st[0].phase, "round");
+});
+
+function noteFixture(v1, v2, n1, n2) {
+  // Left-hand heavy (80%), jabs + hooks, one 3-punch combo, forward weight shift, all reviewed.
+  const P = [];
+  let n = 0;
+  const add = (round, startT, v, i) => {
+    const hand = i % 5 === 4 ? "R" : "L";
+    const type = hand === "R" ? "cross" : i % 3 === 0 ? "hook" : "jab";
+    P.push(mkPunch({ n: ++n, round, startT, t: startT + 150, peakV: v, hand, type, trueType: type, shiftPp: 14 }));
+  };
+  for (let i = 0; i < n1; i++) add(1, i * (58000 / n1), v1, i);
+  for (let i = 0; i < n2; i++) add(2, 60000 + i * (58000 / n2), v2, i);
+  P.push(mkPunch({ n: ++n, round: 2, startT: 118300, t: 118450, peakV: v2, hand: "R", type: "cross", trueType: "cross", shiftPp: 14 }));
+  P.push(mkPunch({ n: ++n, round: 2, startT: 118700, t: 118850, peakV: v2, hand: "L", type: "jab", trueType: "jab", shiftPp: 14 }));
+  P.push(mkPunch({ n: ++n, round: 2, startT: 119100, t: 119250, peakV: v2, hand: "R", type: "cross", trueType: "cross", shiftPp: 14 }));
+  const rounds = [{ n: 1, startT: 0, endT: 60000 }, { n: 2, startT: 60000, endT: 120000 }];
+  return { P, sess: C.buildSession(P, rounds, 120000, { roundMs: 60000 }) };
+}
+
+test("coach notes: a speed gain reads as a gain, not 'held within X%'", () => {
+  const { P, sess } = noteFixture(7, 7.6, 30, 30);
+  const text = C.coachNotes(sess, C.confusion(P), "ms").map((x) => x.text).join(" | ");
+  assert.ok(/Hand speed rose 9% from round 1 to round 2/.test(text), text);
+  assert.ok(!/held within/.test(text), text);
+  const flat = noteFixture(7, 7.1, 30, 30);
+  assert.ok(/held within 3% of round 1 through round 2/.test(C.coachNotes(flat.sess, C.confusion(flat.P), "ms").map((x) => x.text).join(" | ")));
+});
+
+test("coach notes: the auto-label accuracy note is not dropped when every other note fires", () => {
+  const { P, sess } = noteFixture(7, 7.1, 36, 20);                   // held speed + output down 44%
+  const notes = C.coachNotes(sess, C.confusion(P), "ms");
+  const text = notes.map((x) => x.text).join(" | ");
+  for (const re of [/Hand speed held/, /Punch output dropped/, /Left hand threw/, /Quickest punch/, /Longest combination/, /front foot/, /matched your corrections/]) assert.ok(re.test(text), `${re}: ${text}`);
+  assert.equal(notes.length, 7);
+});

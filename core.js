@@ -21,6 +21,7 @@
     startG: 2.0,               // |linAcc| onset threshold (g)
     endG: 0.8,                 // below this = punch over
     maxPunchMs: 450,
+    maxGapMs: 50,              // a bigger hole in the sample stream (BLE dropout, sim restart) aborts the open window
     refractoryMs: 250,
     minPeakV: 1.2,             // m/s — below this it is arm wiggle
     minPathM: 0.15,            // m
@@ -83,7 +84,7 @@
 
   function mkHand() {
     return { q: null, q0: null, lastT: null, active: false, start: 0, v: [0, 0, 0], d: [0, 0, 0],
-             path: 0, peakV: 0, peakA: 0, lastEnd: -Infinity };
+             path: 0, peakV: 0, peakA: 0, lastEnd: -Infinity, aborted: 0 };
   }
 
   // One detector for both wrists. getLead() -> "L" | "R" (stance); onPunch(p) is optional,
@@ -97,6 +98,9 @@
     function acc(hand, a, t) {
       const h = hands[hand];
       if (h.lastT != null && t <= h.lastT) return null; // out-of-order / duplicate sample
+      // A hole in the stream while a window is open means the integrated velocity is stale:
+      // drop the window (no punch, no refractory) and let this sample start fresh below.
+      if (h.active && h.lastT != null && t - h.lastT > cfg.maxGapMs) { h.active = false; h.aborted++; }
       const dt = h.lastT == null ? 0 : Math.min(0.03, (t - h.lastT) / 1000);
       h.lastT = t;
       if (!dt) return null;
@@ -240,9 +244,13 @@
     function tick(t) { return startedAt == null || stoppedAt != null ? [] : emit(t); }
     function stop(t) {
       if (startedAt == null || stoppedAt != null || finished) return [];
+      // Events already due (a roundEnd the 100 ms tick has not delivered yet) come first, so
+      // a Stop pressed right after a round ended still closes that round at its scheduled end.
+      const due = emit(t);
+      if (finished) return due;                     // the session ended on its own before the click
       const ph = phaseAt(t);
       stoppedAt = t;
-      return [{ type: "stopped", t, n: ph.n, phase: ph.phase }];
+      return [...due, { type: "stopped", t, n: ph.n, phase: ph.phase }];
     }
     // Scheduled phase at time t (independent of tick lag).
     function phaseAt(t) {
@@ -331,8 +339,9 @@
     };
   }
 
-  // rounds: [{n, startT, endT|null}]. nowT closes open rounds.
-  function buildSession(punches, rounds, nowT) {
+  // rounds: [{n, startT, endT|null}]. nowT closes open rounds. opts.roundMs = configured round
+  // length (lets the fatigue curve tell a stopped-early stub from a full round).
+  function buildSession(punches, rounds, nowT, opts = {}) {
     const perRound = rounds.map((r) => {
       const pts = punches.filter((p) => p.round === r.n);
       const durMs = Math.max(0, (r.endT ?? nowT) - r.startT);
@@ -346,12 +355,25 @@
     const inRounds = punches.filter((p) => p.round > 0).length;
     if (rounds.length) total.perMin = activeMs > 0 ? inRounds / (activeMs / 60000) : null; // output while the clock was live
     else if (activeMs < 20000) total.perMin = null; // free work too short to be a meaningful rate
-    return { rounds: perRound, total, fatigue: fatigueCurve(perRound), inRounds };
+    const fatigue = fatigueCurve(perRound, opts);
+    const openRound = perRound.find((r) => r.open);
+    const fatigueNote = fatigue ? (openRound ? `R${openRound.n} in progress, not counted` : fatigue.skipped.length ? `R${fatigue.skipped.map((r) => r.n).join(", R")} too short, not counted` : null)
+      : openRound ? "round in progress" : "needs 2+ full rounds";
+    return { rounds: perRound, total, fatigue, fatigueNote, openRound: openRound ? openRound.n : null, inRounds };
   }
 
-  // Output and hand speed per round, as % of the first round with enough data.
-  function fatigueCurve(roundStats) {
-    const usable = roundStats.filter((r) => r.count >= 3 && r.meanV != null && r.perMin != null);
+  // Output and hand speed per round, as % of the first round with enough data. Only complete
+  // rounds count: an open round, or one cut short below minRoundFrac of the full round length,
+  // has a few seconds of punches behind its rate and speed - noise, not fatigue.
+  function fatigueCurve(roundStats, { roundMs = null, minRoundFrac = 0.5 } = {}) {
+    const closed = roundStats.filter((r) => r.open !== true);
+    const full = roundMs ?? Math.max(0, ...closed.map((r) => r.durMs ?? 0));
+    const skipped = [];
+    const usable = roundStats.filter((r) => {
+      if (r.open === true) return false;
+      if (r.durMs != null && full > 0 && r.durMs < full * minRoundFrac) { skipped.push({ n: r.n, reason: "short" }); return false; }
+      return r.count >= 3 && r.meanV != null && r.perMin != null;
+    });
     if (usable.length < 2) return null;
     const base = usable[0];
     const points = usable.map((r) => ({
@@ -359,7 +381,7 @@
       meanV: r.meanV, perMin: r.perMin,
     }));
     const last = points[points.length - 1];
-    return { points, baseRound: base.n, lastRound: last.n, speedFadePct: last.speedPct - 100, rateFadePct: last.ratePct - 100 };
+    return { points, baseRound: base.n, lastRound: last.n, speedFadePct: last.speedPct - 100, rateFadePct: last.ratePct - 100, skipped };
   }
 
   // Confusion matrix over reviewed punches: rows = true label, columns = auto label.
@@ -391,7 +413,8 @@
     const sp = (v) => `${fmtSpeed(v, unit)} ${speedLabel(unit)}`;
     if (f) {
       const s = f.speedFadePct, r = f.rateFadePct;
-      if (s >= -3) notes.push({ tone: "good", text: `Hand speed held within ${Math.abs(s).toFixed(0)}% of round ${f.baseRound} through round ${f.lastRound} — conditioning is holding up.` });
+      if (s >= 3) notes.push({ tone: "good", text: `Hand speed rose ${s.toFixed(0)}% from round ${f.baseRound} to round ${f.lastRound} — you finished faster than you started.` });
+      else if (s >= -3) notes.push({ tone: "good", text: `Hand speed held within 3% of round ${f.baseRound} through round ${f.lastRound} — conditioning is holding up.` });
       else if (s >= -8) notes.push({ tone: "info", text: `Hand speed eased ${Math.abs(s).toFixed(0)}% by round ${f.lastRound} — normal late-round fade; keep the snap on the last combo.` });
       else notes.push({ tone: "warn", text: `Hand speed faded ${Math.abs(s).toFixed(0)}% by round ${f.lastRound} — add late-round speed work (short, sharp rounds).` });
       if (r <= -15) notes.push({ tone: "warn", text: `Punch output dropped ${Math.abs(r).toFixed(0)}% from round ${f.baseRound} to ${f.lastRound} — pace the early rounds or build work capacity.` });
@@ -413,7 +436,7 @@
       else notes.push({ tone: "info", text: `Only ${w.toFixed(0)} pp of forward weight transfer on straight punches — push off the back foot for more reach and snap.` });
     }
     if (conf && conf.n >= 8) notes.push({ tone: conf.accuracy >= 0.85 ? "good" : "info", text: `Auto punch-type labels matched your corrections ${(conf.accuracy * 100).toFixed(0)}% of the time (${conf.n} reviewed).` });
-    return notes.slice(0, 6);
+    return notes.slice(0, 8);                  // 7 can fire today; the cap only guards future additions
   }
 
   function summaryText(session, conf, unit = "ms") {

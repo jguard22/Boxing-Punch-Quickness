@@ -28,7 +28,7 @@ const check = (ok, msg) => { console.log(`${ok ? "ok  " : "FAIL"} ${msg}`); if (
 const server = await startServer(PORT);
 const browser = await chromium.launch({ channel: "chrome", headless: true });
 const errors = [];
-const hard = setTimeout(() => { console.error("HARD TIMEOUT"); process.exit(2); }, 150000);
+const hard = setTimeout(() => { console.error("HARD TIMEOUT"); process.exit(2); }, 240000);
 
 async function newPage(viewport) {
   const ctx = await browser.newContext({ viewport, deviceScaleFactor: 1 });
@@ -53,14 +53,26 @@ try {
   check((await txt(page, "#wt-last")) !== "—", "weight transfer shown for last punch");
   check((await txt(page, "#combo-cur")) !== "—", `combo string shown (${await txt(page, "#combo-cur")})`);
   // units switch on live data
-  const msVal = Number(await txt(page, "#last-speed"));
-  await page.click('#units-seg button[data-unit="mph"]');
-  const mphVal = Number(await txt(page, "#last-speed"));
-  check(Math.abs(mphVal / msVal - 2.23694) < 0.08, `m/s -> mph switch (${msVal} m/s = ${mphVal} mph)`);
+  // Read, switch and read again inside ONE synchronous task: the sim keeps throwing punches, and a
+  // punch landing between two separate reads would change #last-speed for reasons unrelated to the unit.
+  const u = await page.evaluate(() => {
+    const el = document.getElementById("last-speed"), peak = window.__bwBoxing.S.punches.at(-1).peakV;
+    const ms = el.textContent;
+    document.querySelector('#units-seg button[data-unit="mph"]').click();
+    return { ms, mph: el.textContent, peak };
+  });
+  check(u.ms === u.peak.toFixed(1) && u.mph === (u.peak * 2.2369362920544).toFixed(1), `m/s -> mph switch (${u.ms} m/s = ${u.mph} mph, stored ${u.peak.toFixed(3)} m/s)`);
   check((await txt(page, ".u-speed")) === "mph", "unit label follows the switch");
   const stored = await page.evaluate(() => window.__bwBoxing.S.punches[window.__bwBoxing.S.punches.length - 1].peakV);
   check(stored > 1 && stored < 20, `speed stays stored in m/s (${stored.toFixed(2)})`);
   await page.click('#units-seg button[data-unit="ms"]');
+  // mid-session read-out: round 2 is running, so the fatigue numbers must not use it
+  await page.waitForFunction(() => document.getElementById("clock-phase").textContent.includes("Round 2"), null, { timeout: 15000 });
+  await page.waitForTimeout(3200);
+  const kpiSubs = await page.$$eval("#kpis .kpi", (k) => k.map((x) => x.querySelector(".s").textContent.trim()));
+  check(kpiSubs[5] === "round in progress", `late-round speed KPI waits for completed rounds mid-round 2 (${kpiSubs[5]})`);
+  check(!(await txt(page, "#notes")).includes("Hand speed"), "no hand-speed fade note from a round in progress");
+  check((await txt(page, "#fx-tag")) === "round in progress", "fatigue tag says round in progress");
   await page.waitForFunction(() => document.getElementById("clock-phase").textContent.includes("Session complete"), null, { timeout: 60000 });
   await page.waitForTimeout(600);
 
@@ -84,7 +96,8 @@ try {
   // review a punch by hand: relabel the newest punch, the matrix and the log react
   const sel = "#punch-table tbody tr:first-child select";
   const cur = await page.$eval(sel, (e) => e.value);
-  const pick = cur === "uppercut" ? "jab" : "uppercut";
+  const auto = await page.$eval("#punch-table tbody tr:first-child .badge.sm[class*='pt-']", (e) => e.textContent.trim());
+  const pick = ["uppercut", "jab"].find((k) => k !== auto && k !== cur);       // must differ from the auto label and the current one
   const cmBefore = await page.$eval("#cm-wrap", (e) => e.innerHTML);
   await page.selectOption(sel, pick);
   await page.waitForTimeout(300);
@@ -160,6 +173,59 @@ try {
   await pc.reload();
   check((await txt(pc, ".u-speed")) === "mph", "unit preference survives reload");
   await pc.context().close();
+
+  // ---- D: URL timer overrides are one-offs; edits on the page persist ----
+  const pd = await newPage({ width: 1360, height: 900 });
+  const base = `http://127.0.0.1:${PORT}/index.html`;
+  await pd.goto(`${base}?round=0.15&rest=0.05&rounds=3`);
+  await pd.click("#btn-rounds");                               // Start Rounds runs savePrefs()
+  await pd.waitForTimeout(300);
+  await pd.click("#btn-rounds");                               // Stop
+  await pd.goto(base);
+  check((await txt(pd, "#clock-sub")) === "3 min round · 1 min rest × 3", `demo link did not change saved defaults (${await txt(pd, "#clock-sub")})`);
+  await pd.fill("#set-rounds", "4");
+  await pd.dispatchEvent("#set-rounds", "change");
+  await pd.goto(`${base}?round=0.15`);
+  check((await txt(pd, "#clock-sub")) === "9 s round · 1 min rest × 4", `URL overrides one field, saved edit survives (${await txt(pd, "#clock-sub")})`);
+  await pd.goto(base);
+  check((await txt(pd, "#clock-sub")) === "3 min round · 1 min rest × 4", `edit on the page persists, URL value does not (${await txt(pd, "#clock-sub")})`);
+  await pd.context().close();
+
+  // ---- E: Stop/Start Simulate cycles never log a ghost punch from a stale window ----
+  const pe = await newPage({ width: 1360, height: 900 });
+  await pe.goto(base);
+  for (let i = 0; i < 24; i++) {
+    await pe.click("#btn-sim");
+    await pe.waitForTimeout(360 + Math.random() * 200);       // first punch window is open ~300-520 ms after Start
+    await pe.click("#btn-sim");
+    await pe.waitForTimeout(120 + Math.random() * 100);
+  }
+  const ghost = await pe.evaluate(() => window.__bwBoxing.S.punches.filter((p) => p.durMs > 450 || p.t - p.startT > 450).map((p) => p.durMs));
+  check(ghost.length === 0, `no punch longer than the 450 ms cap after 24 stop/start cycles (${ghost.join(",") || "none"})`);
+  const before = await pe.evaluate(() => window.__bwBoxing.S.punches.length);
+  await pe.click("#btn-sim");
+  await pe.waitForTimeout(4000);
+  await pe.click("#btn-sim");
+  const after = await pe.evaluate(() => window.__bwBoxing.S.punches.length);
+  check(after > before, `real punches still detected after the cycles (${before} -> ${after})`);
+  await pe.context().close();
+
+  // ---- F: Stop pressed before the 100 ms tick delivered roundEnd still closes the round ----
+  const pf = await newPage({ width: 1360, height: 900 });
+  await pf.goto(`${base}?round=0.1&rest=0.05&rounds=2`);
+  const closed = await pf.evaluate(() => {
+    const b = document.getElementById("btn-rounds");
+    b.click();                                                  // Start
+    const t0 = performance.now();
+    while (performance.now() - t0 < 6300); // eslint-disable-line no-empty -- block the tick on purpose (6 s round)
+    b.click();                                                  // Stop, no tick ran in between
+    return window.__bwBoxing.S.rounds.map((r) => ({ n: r.n, dur: r.endT == null ? null : Math.round(r.endT - r.startT) }));
+  });
+  check(closed.length === 1 && closed[0].dur === 6000, `round closed at its scheduled end (${JSON.stringify(closed)})`);
+  await pf.waitForTimeout(1500);
+  const rowF = await pf.$$eval("#round-table tbody tr.round-row td:first-child", (c) => c.map((x) => x.textContent.trim()));
+  check(rowF.length === 1 && rowF[0] === "R1", `round row is final, not "R1 ●" (${rowF.join(",")})`);
+  await pf.context().close();
 } catch (e) {
   failures.push(`exception: ${e.message}`);
   console.error(e);

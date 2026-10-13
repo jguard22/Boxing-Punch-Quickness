@@ -30,7 +30,10 @@ Wrist linear acceleration at 200 Hz (5 ms). Onset = |accel| > 2 g after a
 250 ms refractory; the window ends when it falls under 0.8 g or at 450 ms.
 Inside the window the world-frame acceleration (rotated by the game-rotation
 quaternion) is integrated from assumed rest → peak hand speed. Windows with
-peak < 1.2 m/s or path < 15 cm are discarded as arm wiggle. Hand speed is
+peak < 1.2 m/s or path < 15 cm are discarded as arm wiggle. A hole of more than
+50 ms in the sample stream (BLE dropout, Stop → Simulate) aborts the open window
+without emitting a punch — integrated velocity is stale after a gap — and the
+next sample can start a fresh one; Stop Simulate also resets the detector. Hand speed is
 stored and exported in m/s; the **m/s ↔ mph** switch in the header only changes
 the display (remembered per browser).
 
@@ -59,11 +62,13 @@ the top three; each log row shows its combo and position.
 
 ## Rounds
 Default 3 min round, 1 min rest, 3 rounds (all editable; also `?round=3&rest=1&rounds=6`
-in minutes). **Start Rounds** runs the clock: bell on round start (one ring),
+in minutes — URL values apply to that page load only and are never saved as your
+defaults; a value you type into the field on the page is saved). **Start Rounds** runs the clock: bell on round start (one ring),
 10-second clapper warning, two rings at round end (three after the last round),
 a progress bar and a red pulse in the last 10 s. Punches are assigned to the
 round they started in; punches during rest count in the totals but not in any
-round. Stopping early closes the open round with its real duration. A finished
+round. Stopping early closes the open round with its real duration (a Stop pressed just
+after a round ended still closes that round at its scheduled end). A finished
 or stopped session locks the timer until **Reset session** (two-click confirm,
 so you can't lose labels by accident — export first).
 
@@ -85,7 +90,10 @@ the rest of the demo is unaffected.
 ## Fatigue curve
 Mean hand speed and punches/min per round, each indexed to the first round with
 3+ punches (= 100 %). Shown from the second usable round on, with the late-round
-speed and output change in the summary.
+speed and output change in the summary. Only **completed** rounds count: a round
+still running, or one stopped before half its configured length, is left out
+(a few seconds of punches would read as a fake fade), and the panel says "round
+in progress" until two full rounds are in.
 
 ## Confusion matrix
 Rows = your (corrected) label, columns = the heuristic's label, only for punches
@@ -100,8 +108,8 @@ perfect diagonal.
 Always-on panel: punches, punches/min, mean / peak speed (and the punch type of
 the peak), combinations and longest, L/R balance with per-hand speed, late-round
 speed and output change, weight to the front foot on straights, auto-label
-match — plus plain-language coaching notes (training wording, not medical) and a
-**Copy summary** button.
+match — plus plain-language coaching notes (training wording, not medical; up to
+seven can show) and a **Copy summary** button.
 
 ## CSV
 - **Export Punches CSV** — the original columns first
