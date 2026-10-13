@@ -136,6 +136,30 @@ try {
   await pb.click("#btn-reset");
   check((await txt(pb, "#count-total")) === "0", "reset clears the session");
   await pb.context().close();
+
+  // ---- C: southpaw + stop mid-round + unit preference survives reload ----
+  const pc = await newPage({ width: 1360, height: 900 });
+  await pc.goto(`http://127.0.0.1:${PORT}/index.html?round=0.5&rest=0.05&rounds=2`);
+  await pc.click("#btn-stance");
+  check((await txt(pc, "#btn-stance")) === "Stance: Southpaw", "stance toggle");
+  await pc.click('#units-seg button[data-unit="mph"]');
+  await pc.click("#btn-sim");
+  await pc.click("#btn-rounds");
+  await pc.waitForTimeout(8000);
+  await pc.click("#btn-rounds"); // Stop
+  check((await txt(pc, "#clock-phase")) === "Stopped", "Stop ends the clock");
+  check((await txt(pc, "#summary-tag")) === "stopped early", "summary says stopped early");
+  check((await txt(pc, "#btn-sim")) === "Simulate", "sim stops with the clock");
+  check(await pc.$eval("#btn-rounds", (b) => b.disabled), "start disabled until reset");
+  const rr = await pc.$$eval("#round-table tbody tr.round-row td:first-child", (c) => c.map((x) => x.textContent.trim()));
+  check(rr.length === 1 && rr[0] === "R1", `one closed round row (${rr.join(",")})`);
+  const wrong = await pc.evaluate(() => window.__bwBoxing.S.punches.filter((p) => (p.hand === "R" && p.type === "cross") || (p.hand === "L" && p.type === "jab")).length);
+  check(wrong === 0, "southpaw: right hand throws the jab, left the cross");
+  const nums = await pc.evaluate(() => window.__bwBoxing.S.combos.every((c) => /^[1-6](-[1-6])*$/.test(c.str)));
+  check(nums, "combo strings use boxing numbers 1-6");
+  await pc.reload();
+  check((await txt(pc, ".u-speed")) === "mph", "unit preference survives reload");
+  await pc.context().close();
 } catch (e) {
   failures.push(`exception: ${e.message}`);
   console.error(e);
