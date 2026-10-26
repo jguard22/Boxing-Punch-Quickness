@@ -119,7 +119,9 @@ try {
   await ready(page);
   check(await page.evaluate(() => document.documentElement.dataset.mode === "fight"), "the page opens in Fight view");
   check((await visible(page, "#fun-hero")) && (await txt(page, "#hero-title")) === "Bag work, but it talks back.", "hero: Bag work, but it talks back");
+  check((await page.$eval("#hero-title", (e) => parseFloat(getComputedStyle(e).fontSize))) >= 32, "the hero headline is a headline (32 px or more), not a small caption");
   check((await txt(page, "#hero-warmup")).includes("30-second warm-up") && (await txt(page, "#hero-sim")).includes("Simulate"), "hero offers the warm-up and Simulate (no sensors)");
+  check(!(await visible(page, "#card-last")) && !(await visible(page, "#card-count")) && !(await visible(page, "#card-combos")), "a first screen has no empty Last Punch, Punch Count or Combos cards");
   check((await txt(page, "#hero-safety")) === "Wrap your hands. Warm up first. Stop if anything hurts.", "the safety line is under the buttons");
   check(!(await visible(page, "#punch-table")) && !(await visible(page, "#cm-wrap")), "lab details are collapsed in Fight view");
   check((await overflow(page)) <= 1, `no horizontal scroll at 390 px (hero)`);
@@ -138,6 +140,8 @@ try {
   check((await visible(page, "#fun-stage")) && !(await visible(page, "#fun-hero")), "the stage replaces the hero while the round runs");
   check((await txt(page, "#stage-last")) === (await txt(page, "#last-type")) && (await txt(page, "#stage-last")) !== "—", `the punch is on the stage as it lands (${await txt(page, "#stage-last")})`);
   check((await txt(page, "#stage-phase")) === "Warm-up round", "phase: Warm-up round");
+  check(await page.evaluate(() => ["jab", "cross", "hook", "uppercut"].includes(document.getElementById("fun-stage").dataset.hit) && getComputedStyle(document.getElementById("stage-speed")).fontSize.length > 0), "a punch sets the stage's hit colour (its type) for the slam, ring and edge");
+  check((await page.$eval("#stage-speed", (e) => parseFloat(getComputedStyle(e).fontSize))) >= 64, "the hand speed on the stage is big (64 px or more)");
   check((await txt(page, "#stage-time")).match(/^0:\d\d$/) != null, "the round time is on the stage");
   check((await txt(page, "#fun-status")).includes("Simulate: XP isn't saved, except your Welcome Bonus."), "status: Simulate: XP isn't saved, except your Welcome Bonus");
   await page.screenshot({ path: path.join(OUT, "02-warmup.png"), fullPage: false });
@@ -185,6 +189,8 @@ try {
   await page.waitForTimeout(400);
   check(await page.evaluate(() => window.__bwBoxing.S.rounds.length === 1 && window.__bwBoxing.S.sim), "Round 1: Coach Calls starts a fresh set and keeps Simulate on");
   check((await txt(page, "#stage-phase")).startsWith("Round 1 of 2"), "phase: Round 1 of 2");
+  const opened = await until(page, () => !document.getElementById("call-banner").hidden, 25000, "the first call");
+  check(opened && (await visible(page, "#call-ring")), "the time-left ring shows while a call is open (an SVG has no .hidden, so it once never showed)");
   const stamped = await until(page, () => !document.getElementById("call-stamp").hidden, 25000, "the first judgment stamp");
   check(stamped, "a coach call was judged");
   if (stamped) {
@@ -241,11 +247,38 @@ try {
     check(await page2.evaluate(() => document.documentElement.dataset.theme === "light"), "a light device gets the light look");
     check((await overflow(page2)) <= 1, "no horizontal scroll at 414 px");
     await page2.click("#hero-sim");
+    await until(page2, () => window.__bwBoxing.S.punches.length > 0, 4000, "a punch");
+    await page2.waitForTimeout(100);
+    check(await page2.evaluate(() => ["stage-speed", "hit-ring"].every((id) => getComputedStyle(document.getElementById(id)).animationName === "none") && getComputedStyle(document.getElementById("fun-stage"), "::before").animationName === "none"), "device reduced motion: no slam, ring or edge wash (the colour, number and words stay)");
     await until(page2, () => !document.getElementById("fun-grade").hidden, 40000, "the grade");
     check(await page2.evaluate(() => getComputedStyle(document.getElementById("grade-stamp")).animationName === "none" && !document.documentElement.dataset.motion), "device reduced motion: no animation, no in-app override needed");
     await dismissModal(page2);
     await page2.screenshot({ path: path.join(OUT, "08-light-reduced.png"), fullPage: false });
     await page2.context().close();
+  }
+
+  // ---- D2: the returning visitor on a booth screen (1280 x 800): the bests and Start a round are on the first screen, and nothing sideways at 320 px
+  {
+    const p4 = await newPage({ viewport: { width: 1280, height: 800 } });
+    await p4.goto(PAGE);
+    await ready(p4);
+    await p4.evaluate(() => {
+      const k = window.__bwFun.kit;
+      k.pb.submit("speed_jab", 8.1, { at: Date.now() }); k.pb.submit("speed_cross", 9.4, { at: Date.now() }); k.pb.submit("speed_hook", 8.7, { at: Date.now() }); k.pb.submit("speed_uppercut", 7.6, { at: Date.now() }); k.pb.submit("longestChain", 4, { at: Date.now() });
+      k.store.set("firstwin", { startedAt: 1, index: 3, beatAt: 1, doneAt: 2, nudged: [], assisted: false, timeToWinMs: 30000 });
+    });
+    await p4.reload(); await ready(p4);
+    check((await txt(p4, "#hero-warmup")) === "Start a round" && (await txt(p4, "#hero-detail")).startsWith("Coach Calls:"), "returning: the first button says Start a round, with one line on what it runs");
+    const fold = await p4.evaluate(() => { const r = document.getElementById("pb-list").getBoundingClientRect(), first = document.querySelector("#pb-list .pb-cell.speed").getBoundingClientRect(); return { cells: document.querySelectorAll("#pb-list .pb-cell.speed").length, marks: document.querySelectorAll("#pb-list .pb-cell.mark").length, firstBottom: first.bottom, vh: innerHeight, shown: !document.getElementById("card-pb").hidden && r.height > 0 }; });
+    check(fold.shown && fold.cells === 4 && fold.marks === 1 && fold.firstBottom <= fold.vh, `returning: the four speed bests are on the first screen at 1280 x 800 (the row ends at ${Math.round(fold.firstBottom)} of ${fold.vh} px)`);
+    check(await p4.evaluate(() => { const v = (id) => getComputedStyle(document.getElementById(id)).display !== "none"; return !v("card-last") && !v("card-count") && !v("card-combos") && v("card-clock"); }), "returning: only the timer settings sit under the bests, no empty punch cards");
+    await p4.click('#units-seg button[data-unit="mph"]');
+    check((await txt(p4, "#pb-list .pb-cell.speed .unit")) === "mph" && (await txt(p4, "#pb-list .pb-cell.speed .val")) === "18.1", "the bests follow the m/s or mph switch (8.1 m/s is 18.1 mph)");
+    await p4.setViewportSize({ width: 320, height: 640 });
+    await p4.waitForTimeout(200);
+    check((await overflow(p4)) <= 1, "no horizontal scroll at 320 px (returning first screen)");
+    check(await p4.evaluate(() => { const a = [...document.querySelectorAll("nav.sections a")]; return a.every((x) => x.getBoundingClientRect().right <= innerWidth + 1) && new Set(a.map((x) => Math.round(x.getBoundingClientRect().top))).size === 1 && a.every((x) => x.getBoundingClientRect().height >= 44); }), "the section links fit one row at 320 px, none scrolls out of view, each is 44 px tall");
+    await p4.context().close();
   }
 
   // ---- E: a small phone (375 x 667) during a round: the view is locked mid-set, the stage is on top, the chrome steps aside, Count it fits on screen
