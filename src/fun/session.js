@@ -65,7 +65,7 @@ export function createSession({ view, win = globalThis.window, now = () => perfo
     // a session on the page that the game is not showing (left by the Lab view, by Forget my data, or by anything unexpected) is not ours to wipe
     // silently, and the Play area must never be blank: the hero says so before it starts a new one
     const orphan = hasRounds && !running && !graded;
-    view.layout({ hero: (!hasRounds && !running) || orphan, stage: running, grade: graded && hasRounds, actions: !running && !!st.set?.done, recap: !!st.set?.rounds.some((r) => r.punches > 0) });
+    view.layout({ hero: (!hasRounds && !running) || orphan, stage: running, grade: graded && hasRounds, actions: !running && !!st.set?.done, recap: !!st.set?.rounds.some((r) => r.punches > 0), punches: s.punches.length });
     if (orphan) view.hint(COPY.hero.sessionOnPage);
     view.againLabel(againIsCoached() ? COPY.recap.cta.again : COPY.recap.cta.warm);
   }
@@ -77,7 +77,7 @@ export function createSession({ view, win = globalThis.window, now = () => perfo
   }
   function refreshHero() {
     const first = !firstWin.isDone();
-    view.setHero({ first, coachText: COPY.hero.coach(S().settings.rounds, roundText()), sim: S().sim, ready: sensorsLive() });
+    view.setHero({ first, coachText: COPY.hero.round, detailText: COPY.hero.roundDetail(S().settings.rounds, roundText()), sim: S().sim, ready: sensorsLive() });
   }
   let goalNote = "";
   function refreshSettings() {
@@ -104,7 +104,7 @@ export function createSession({ view, win = globalThis.window, now = () => perfo
   /** Personal bests of the profile in view. Speeds are stored in m/s; the text is made by the kit's format, which reads the m/s or mph choice. */
   function refreshPb() {
     try {
-      const items = viewKit().pb.all().filter((x) => x.best != null).map((x) => ({ label: x.label, text: x.bestText }));
+      const items = viewKit().pb.all().filter((x) => x.best != null).map((x) => ({ id: x.id, label: x.label, text: x.bestText }));
       view.pbShelf({ items, show: items.length > 0 });
     } catch (e) { warn("bests", e); }
   }
@@ -255,7 +255,7 @@ export function createSession({ view, win = globalThis.window, now = () => perfo
     view.setStage(stageState(true));
     view.flow(FLOW.min, false);
     view.coach(set.kind === "warmup" ? COPY.coachMarks.start : !callsOn() ? COPY.call.off : COPY.call.ready);
-    view.lastNote(null); view.tier(null);
+    view.lastNote(null); view.tier(null); view.resetHit();
     view.stageTally(0); view.stageProgress(0); view.easeOffer(false);
     view.beats(set.kind === "warmup" && firstWin.state().active ? { punch: false, combo: false, bell: false } : null);
     layout();
@@ -419,6 +419,7 @@ export function createSession({ view, win = globalThis.window, now = () => perfo
     else {
       const tier = speedTier(p.peakV, best);
       view.tier(tier, p.type);
+      if (tier?.id === "snap") cel.readout("snapTick");           // a Snap gets a small bright tick after its thud (the Snap chip and the full meter are its visual twin)
       if (!tier) view.lastNote(COPY.tiers.none);
       else if (tier.id === "easy") view.lastNote(COPY.tiers.easy.line());
       else view.lastNote(null);

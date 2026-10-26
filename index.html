@@ -4,9 +4,9 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Brilliant Wear — Boxing Punch Quickness Demo</title>
-<link rel="stylesheet" href="styles.css?v=4" />
+<link rel="stylesheet" href="styles.css?v=5" />
 <link rel="stylesheet" href="src/vendor/fun-kit/ui/fun-kit.css" />
-<link rel="stylesheet" href="fun.css?v=1" />
+<link rel="stylesheet" href="fun.css?v=2" />
 <script>
   // Before first paint: which view (Fight is the game view, Lab the original page), look and motion. ?fun=0 turns the fun layer off
   // and shows the original page exactly as it was; ?mode=lab shows the lab view for this visit only.
@@ -64,36 +64,60 @@
   <div id="fun-status" class="fun-status"></div>
 
   <div id="fun-hero" class="card hero" role="group" aria-labelledby="hero-title" tabindex="-1">
-    <h2 id="hero-title" class="hero-title">Bag work, but it talks back.</h2>
-    <p class="hero-sub" id="hero-sub">The coach calls a combo, you throw it, the bell keeps score.</p>
-    <div class="row hero-actions">
-      <button class="primary big" id="hero-warmup">Start 30-second warm-up</button>
-      <button class="big" id="hero-sim">Simulate (no sensors)</button>
-      <button class="ghost big" id="hero-warm" hidden>Warm-up again (30 seconds)</button>
+    <div class="hero-copy">
+      <p class="hero-eyebrow">Boxing Punch Quickness</p>
+      <h2 id="hero-title" class="hero-title">Bag work, but it talks back.</h2>
+      <p class="hero-sub" id="hero-sub">The coach calls a combo, you throw it, the bell keeps score.</p>
+      <div class="row hero-actions">
+        <button class="primary big" id="hero-warmup">Start 30-second warm-up</button>
+        <button class="big" id="hero-sim">Simulate (no sensors)</button>
+        <button class="ghost big" id="hero-warm" hidden>Warm-up again (30 seconds)</button>
+      </div>
+      <p class="hero-detail" id="hero-detail" hidden></p>
+      <p class="hero-hint" id="hero-hint" role="status" hidden></p>
+      <p class="safety" id="hero-safety">Wrap your hands. Warm up first. Stop if anything hurts.</p>
     </div>
-    <p class="hero-hint" id="hero-hint" role="status" hidden></p>
-    <p class="safety" id="hero-safety">Wrap your hands. Warm up first. Stop if anything hurts.</p>
+    <!-- what the wrist sensors read: one punch as a speed curve, with the peak and your best marked. Drawn once, decorative. -->
+    <svg class="hero-art" viewBox="0 0 360 170" role="img" aria-label="One punch as a speed curve: the sensor reads the peak hand speed and compares it with your best.">
+      <defs><linearGradient id="art-fill" x1="0" y1="0" x2="0" y2="1"><stop offset="0" class="art-stop"/><stop offset="1" class="art-stop z"/></linearGradient></defs>
+      <rect class="art-window" x="40" y="14" width="250" height="124" rx="6"/>
+      <line class="art-axis" x1="16" y1="138" x2="346" y2="138"/>
+      <path class="art-best" d="M40 138 C 78 138, 94 30, 138 30 C 188 30, 214 138, 290 138"/>
+      <path class="art-area" d="M40 138 C 70 138, 84 52, 124 52 C 172 52, 198 138, 290 138 Z"/>
+      <path class="art-curve" pathLength="1" d="M40 138 C 70 138, 84 52, 124 52 C 172 52, 198 138, 290 138"/>
+      <line class="art-peak-line" x1="124" y1="52" x2="124" y2="138"/>
+      <circle class="art-peak" cx="124" cy="52" r="6"/>
+      <text class="art-label" x="136" y="70">peak hand speed</text>
+      <text class="art-label best" x="150" y="26">your best</text>
+      <text class="art-label dim" x="40" y="158">punch window</text>
+      <text class="art-label dim" x="346" y="158" text-anchor="end">time</text>
+    </svg>
   </div>
 
   <div id="fun-stage" class="card stage" role="group" aria-labelledby="stage-title" tabindex="-1" hidden>
-    <h2 id="stage-title">Coach <span class="tag"><span id="stage-phase">Warm-up</span> · <span id="stage-time">0:30</span></span></h2>
+    <div class="stage-head">
+      <h2 id="stage-title"><span class="stage-name">Coach</span><span class="stage-phase" id="stage-phase">Warm-up</span></h2>
+      <div class="stage-bar">
+        <span class="chip flow" id="stage-flow" hidden>Flow x1</span>
+        <button class="ghost sm" id="stage-voice" aria-pressed="false" title="Speak each call out loud">Voice off</button>
+        <button class="ghost sm" id="stage-stop">Stop</button>
+      </div>
+    </div>
+    <div class="stage-main">
+      <div class="stage-clock"><span class="stage-time" id="stage-time">0:30</span><span class="sr-only"> left in the round</span></div>
+      <div class="call" id="call-banner" hidden>
+        <div class="call-main">
+          <div class="call-digits" id="call-digits" aria-hidden="true"></div>
+          <div class="call-names" id="call-names"></div>
+        </div>
+        <svg class="call-ring" id="call-ring" viewBox="0 0 36 36" aria-hidden="true" hidden><circle class="ring-track" cx="18" cy="18" r="15.9155"/><circle class="ring-bar" id="ring-bar" cx="18" cy="18" r="15.9155" pathLength="100"/></svg>
+      </div>
+    </div>
     <div class="progress stage-progress" aria-hidden="true"><i id="stage-bar"></i></div>
     <div class="beats" id="stage-beats" role="list" aria-label="First win steps" hidden>
       <span class="beat" role="listitem" data-b="punch" data-done="0">First punch</span>
       <span class="beat" role="listitem" data-b="combo" data-done="0">First combo</span>
       <span class="beat" role="listitem" data-b="bell" data-done="0">Warm-up bell</span>
-    </div>
-    <div class="stage-bar">
-      <span class="chip flow" id="stage-flow" hidden>Flow x1</span>
-      <button class="ghost sm" id="stage-voice" aria-pressed="false" title="Speak each call out loud">Voice off</button>
-      <button class="ghost sm" id="stage-stop">Stop</button>
-    </div>
-    <div class="call" id="call-banner" hidden>
-      <div class="call-main">
-        <div class="call-digits" id="call-digits" aria-hidden="true"></div>
-        <div class="call-names" id="call-names"></div>
-      </div>
-      <svg class="call-ring" id="call-ring" viewBox="0 0 36 36" aria-hidden="true" hidden><circle class="ring-track" cx="18" cy="18" r="15.9155"/><circle class="ring-bar" id="ring-bar" cx="18" cy="18" r="15.9155" pathLength="100"/></svg>
     </div>
     <div class="stamp" id="call-stamp" hidden></div>
     <div class="countit" id="countit" hidden>
@@ -101,11 +125,13 @@
       <button class="primary" id="btn-countit">Count it</button>
     </div>
     <div class="live-row" id="stage-live" aria-hidden="true">
-      <span class="badge pt-jab" id="stage-last">—</span>
-      <span class="live-speed"><b id="stage-speed">—</b><span class="unit u-speed">m/s</span></span>
-      <span class="combo-str" id="stage-combo">—</span>
-      <span class="tally" id="stage-tally">0 punches</span>
-      <span class="tier" id="stage-tier" hidden></span>
+      <div class="hit-id"><span class="badge pt-jab" id="stage-last">—</span><span class="badge sm hand-badge hand-L" id="stage-hand" hidden>L</span></div>
+      <div class="hit-speed"><span class="hit-ring" id="hit-ring"></span><b id="stage-speed">—</b><span class="unit u-speed">m/s</span></div>
+      <div class="hit-meta">
+        <span class="hit-grade"><span class="tier" id="stage-tier" hidden></span><span class="tier-meter" id="stage-meter" data-lit="0" hidden><i></i><i></i><i></i><i></i></span></span>
+        <span class="combo-str" id="stage-combo">—</span>
+        <span class="tally" id="stage-tally">0 punches</span>
+      </div>
     </div>
     <p class="coach-line" id="coach-line">Coach calls start with your next round.</p>
   </div>
@@ -127,6 +153,11 @@
       <button id="grade-again">Play again</button>
     </div>
     <p class="note warn-note" id="grade-warn" role="status" hidden></p>
+  </div>
+  <div class="card fun-only bests" id="card-pb" hidden role="group" aria-labelledby="pb-title">
+    <h2 id="pb-title">Your bests <span class="tag" id="pb-tag">your own marks</span></h2>
+    <ul class="pb-list" id="pb-list"></ul>
+    <p class="note" id="pb-note">Bests count after your first minute of a session, never in the warm-up round. Speeds follow the m/s or mph switch.</p>
   </div>
 </section>
 
@@ -150,7 +181,7 @@
     </div>
   </div>
 
-  <div class="card" id="card-last">
+  <div class="card live-card" id="card-last">
     <h2>Last Punch <span class="tag">auto-classified</span></h2>
     <div class="last-head">
       <span class="badge pt-jab" id="last-type">—</span>
@@ -165,7 +196,7 @@
     <p class="note fun-only" id="last-note" hidden></p>
   </div>
 
-  <div class="card" id="card-count">
+  <div class="card live-card" id="card-count">
     <h2>Punch Count <span class="tag" id="rate">0 /min</span></h2>
     <div><span class="big" id="count-total">0</span><span class="unit">total</span></div>
     <div class="sub2">L <b id="count-L">0</b> · R <b id="count-R">0</b> · best <b id="best-speed">—</b> <span class="u-speed">m/s</span></div>
@@ -173,7 +204,7 @@
   </div>
 
   <!-- combos / weight transfer / reaction -->
-  <div class="card" id="card-combos">
+  <div class="card live-card" id="card-combos">
     <h2>Combos <span class="tag" id="combo-count">0 combos</span></h2>
     <div class="combo-str" id="combo-cur">—</div>
     <div class="combo-names" id="combo-names">latest combination, boxing numbers</div>
@@ -186,12 +217,6 @@
     <h2>Combo Book <span class="tag" id="book-tag">0 of 11</span></h2>
     <ul class="book" id="book-list"></ul>
     <p class="note" id="book-note">Land a combo, called or free, and its page fills in.</p>
-  </div>
-
-  <div class="card fun-only" id="card-pb" hidden>
-    <h2>Personal bests <span class="tag" id="pb-tag">your own marks</span></h2>
-    <ul class="book pb-list" id="pb-list"></ul>
-    <p class="note" id="pb-note">Bests count after your first minute of a session, never in the warm-up round. Speeds follow the m/s or mph switch.</p>
   </div>
 
   <div class="lab-toggle fun-only" id="lab">

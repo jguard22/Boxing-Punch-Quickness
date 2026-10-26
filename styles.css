@@ -23,7 +23,9 @@
   --gap-grid: .875rem; --gap-row: 1.125rem;
 
   /* type */
-  --font: -apple-system, "SF Pro Text", Inter, "Segoe UI", Roboto, sans-serif;
+  --font: -apple-system, "SF Pro Text", "Segoe UI", Roboto, sans-serif;
+  /* the display face: condensed numerals and headlines (a scoreboard, not a form). System faces only, so a booth with no network still gets it. */
+  --font-display: "DIN Condensed", "Bahnschrift Condensed", "Barlow Condensed", "Roboto Condensed", "Arial Narrow", "Avenir Next Condensed", "Helvetica Neue", system-ui, sans-serif;
   --fs-2xs: .62rem; --fs-xs: .68rem; --fs-sm: .75rem; --fs-md: .8rem; --fs-base: .85rem; --fs-lg: 1rem;
   --fs-kv: 1.35rem; --fs-big: 2.2rem; --fs-combo: 1.9rem; --fs-clock: 3.4rem; --fs-brand: 1.15rem; --fs-root: 16px;
   --fw-medium: 500; --fw-semi: 650; --fw-bold: 700; --fw-black: 800;
@@ -44,7 +46,12 @@
   --dur: .15s; --dur-fast: .1s; --dur-bar: .4s; --dur-pulse: 1s;
 
   /* fun layer (fun.css): sizes, type steps and the few timings its once-only animations use */
-  --tap: 3rem; --fs-hero: 1.75rem; --fs-stamp: 1.5rem; --fs-digit: 3rem; --fs-grade: 2.4rem;
+  --tap: 3rem; --fs-hero: clamp(2.5rem, min(7vw, 9vh), 4.25rem); --fs-stamp: 1.75rem; --fs-digit: clamp(3.5rem, min(11vw, 15vh), 9rem); --fs-grade: clamp(2.5rem, 7vw, 3.5rem);
+  /* the scoreboard: sized to read from two to three metres (a bag, a booth) and to still fit a 320 px phone */
+  --fs-slam: clamp(4.5rem, min(17vw, 22vh), 12rem); --fs-board: clamp(4rem, min(13vw, 17vh), 9rem); --fs-bests: clamp(2.25rem, 6vw, 3.25rem); --fs-label: .8125rem;
+  --ring-hit: clamp(8rem, min(30vw, 40vh), 20rem); --hero-art-w: 26rem; --ls-display: .01em; --ls-label: .16em; --meter-w: 1.75rem; --bar-h-stage: 1rem; --edge: .375rem;
+  --dur-slam: .3s; --dur-ring: .55s; --dur-flash: .36s; --dur-draw: .9s; --dur-count: .18s;
+  --slam-scale: 1.32; --ring-from: .35; --ring-to: 1.7;
   --ring: 4.5rem; --ring-w: 3; --w-recap: 30rem; --w-seg: 7rem; --nav-h: 2.75rem;
   --dur-pop: .26s; --dur-stamp: .34s; --dur-slide: .22s;
   --ease-out: cubic-bezier(.22, 1, .36, 1); --ease-spring: cubic-bezier(.34, 1.56, .64, 1);
@@ -73,11 +80,13 @@
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
 :root { font-size: var(--fs-root); }
+/* nothing on this page moves sideways: tables and the recap steps scroll in their own boxes, the page never does */
+html { overflow-x: clip; overscroll-behavior-x: none; }
 body {
   font-family: var(--font);
   background: radial-gradient(var(--bg-glow-w) var(--bg-glow-h) at 70% -10%, var(--bg-glow) 0%, var(--navy) 45%, var(--navy-2) 100%);
   color: var(--text); min-height: 100vh; padding: var(--sp-5) var(--sp-6) var(--sp-12);
-  line-height: var(--lh-body);
+  line-height: var(--lh-body); overflow-x: clip;
 }
 
 /* header + controls */

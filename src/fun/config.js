@@ -174,6 +174,7 @@ export const SOUND_PLANS = Object.freeze({
   thudCross: [{ f: 118, f2: 52, dur: 0.15, gain: 0.55 }, { f: 900, dur: 0.02, gain: 0.1, type: "square" }],
   thudHook: [{ f: 210, f2: 60, dur: 0.22, gain: 0.42, type: "triangle" }, { f: 640, f2: 160, dur: 0.16, gain: 0.08, type: "sawtooth" }],
   thudUpper: [{ f: 150, f2: 430, dur: 0.15, gain: 0.38, type: "triangle" }, { f: 430, at: 0.12, dur: 0.05, gain: 0.16 }],
+  snapTick: [{ f: 2400, at: 0.04, dur: 0.03, gain: 0.12, type: "square" }, { f: 3200, at: 0.075, dur: 0.05, gain: 0.09 }],
   callBlip: [{ f: 660, dur: 0.07, gain: 0.2 }, { f: 880, at: 0.09, dur: 0.1, gain: 0.2 }],
   stampPerfect: [{ f: 1318.5, dur: 0.18, gain: 0.3 }, { f: 1760, at: 0.1, dur: 0.32, gain: 0.3 }],
   stampGreat: [{ f: 1046.5, dur: 0.3, gain: 0.3 }],

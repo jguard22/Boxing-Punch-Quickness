@@ -1,8 +1,12 @@
 /* Bag Work: the fun layer of the Boxing Punch Quickness demo.
+   Art direction: a fight-night scoreboard. Condensed numerals big enough to read from two or three metres, one hard hit per punch
+   (the speed slams in, a ring opens behind it, the card's edge washes in the punch type's colour), everything else quiet.
+   Borrowed from Teenage Engineering (a display that is all numerals, one accent) and Mueller-Brockmann (a plain grid, rules not boxes).
+   Signature: the impact slam.
    The shared kit's --fk-* tokens are mapped to this page's own tokens (styles.css), so the light and dark looks come along.
    Everything below reads tokens only: no raw colours, sizes or timings. Motion is transform and opacity and runs once: nothing
-   loops, nothing blinks, so no cue can flash more than three times a second. Reduced motion (device setting or Settings > Motion)
-   removes all of it and the cues keep their words and shapes. */
+   loops, nothing blinks, and the ring and the wash fire at most three times a second, so no cue can flash more than that. Reduced
+   motion (device setting or Settings > Motion) removes all of it and the cues keep their words, shapes and colours. */
 
 :root {
   --fk-accent: var(--teal); --fk-accent-ink: var(--ink-teal); --fk-accent-text: var(--teal-text);
@@ -14,14 +18,15 @@
   --fk-line: var(--line); --fk-track: var(--line); --fk-overlay: color-mix(in srgb, var(--navy-2) 82%, transparent);
   --fk-shadow: 0 var(--sp-6) var(--sp-12) calc(var(--sp-5) * -1) color-mix(in srgb, var(--navy-2) 70%, transparent);
   --fk-focus: var(--text);
-  --fk-font: var(--font); --fk-font-display: var(--font);
-  --fk-fs-0: var(--fs-lg); --fk-fs-1: calc(var(--fs-lg) * 1.125); --fk-fs-2: var(--fs-kv); --fk-fs-3: var(--fs-big); --fk-fs-4: var(--fs-clock); --fk-fs-small: var(--fs-md);
+  --fk-font: var(--font); --fk-font-display: var(--font-display);
+  --fk-fs-0: var(--fs-lg); --fk-fs-1: calc(var(--fs-lg) * 1.125); --fk-fs-2: var(--fs-kv); --fk-fs-3: var(--fs-big); --fk-fs-4: var(--fs-bests); --fk-fs-small: var(--fs-md);
   --fk-space-1: var(--sp-1); --fk-space-2: var(--sp-2); --fk-space-3: var(--sp-3); --fk-space-4: var(--sp-4); --fk-space-5: var(--sp-6); --fk-space-6: var(--sp-8);
   --fk-radius: var(--r-lg); --fk-radius-sm: var(--r-md); --fk-tap: var(--tap);
   --fk-dur: var(--dur-slide); --fk-dur-fast: var(--dur); --fk-dur-slow: var(--dur-stamp); --fk-ease: var(--ease-out); --fk-spring: var(--ease-spring);
   --fk-rarity-common: var(--muted); --fk-rarity-uncommon: var(--teal-text); --fk-rarity-rare: var(--blue-text); --fk-rarity-epic: var(--violet-text); --fk-rarity-legendary: var(--amber-text);
   --fk-confetti-1: var(--teal); --fk-confetti-2: var(--amber); --fk-confetti-3: var(--blue); --fk-confetti-4: var(--violet); --fk-confetti-5: var(--text);
   --fkx-toast-top: calc(var(--nav-h) + var(--sp-2));
+  --blur: .5rem;
 }
 
 .sr-only { position: absolute; width: var(--bw); height: var(--bw); margin: calc(var(--bw) * -1); padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
@@ -34,14 +39,23 @@ html[data-fun="off"] .fun-switch { display: none !important; }
 html[data-mode="fight"] .lab-card { display: none; }
 html[data-mode="fight"][data-lab="open"] .lab-card { display: block; }
 html[data-mode="fight"]:not([data-setup="open"]) .setup-tool { display: none; }
+/* a first screen with nothing to show says so once, in the hero: the three empty live cards wait until there is a punch, and the timer card steps aside while the stage runs */
+html[data-fun="on"][data-mode="fight"][data-punches="0"] .live-card { display: none; }
+html[data-fun="on"][data-mode="fight"][data-hero="0"] #card-clock { display: none; }
+html[data-fun="on"][data-mode="fight"][data-playing="1"] #card-pb { display: none; }
+
+/* tap targets in the Fight view: every control is at least 44 px tall (the header was 36) */
+html[data-fun="on"][data-mode="fight"] #top button, html[data-fun="on"][data-mode="fight"] #top .seg button, html[data-fun="on"][data-mode="fight"] .live-card button,
+html[data-fun="on"][data-mode="fight"] #card-clock button, html[data-fun="on"][data-mode="fight"] .lab-toggle button { min-height: var(--nav-h); }
+html[data-fun="on"][data-mode="fight"] #top .seg-label { align-self: center; }
 
 /* ---------------------------------------------------------------- section nav: always one tap to a labelled section */
 .sections {
-  position: sticky; top: 0; z-index: 5; display: flex; gap: var(--sp-2); overflow-x: auto; margin: 0 calc(var(--sp-6) * -1) var(--sp-4); padding: var(--sp-2) var(--sp-6);
-  background: color-mix(in srgb, var(--navy) 92%, transparent); border-bottom: var(--bw) solid var(--line); min-height: var(--nav-h); align-items: center;
+  position: sticky; top: 0; z-index: 5; display: flex; flex-wrap: wrap; gap: var(--sp-2); margin: 0 calc(var(--sp-6) * -1) var(--sp-4); padding: var(--sp-1) var(--sp-6);
+  background: color-mix(in srgb, var(--navy) 96%, transparent); backdrop-filter: blur(var(--blur)); border-bottom: var(--bw) solid var(--line); min-height: var(--nav-h); align-items: center;
 }
 .sections a {
-  flex: none; color: var(--text); text-decoration: none; font-size: var(--fs-base); font-weight: var(--fw-semi); padding: var(--sp-1) var(--sp-3);
+  flex: none; color: var(--text); text-decoration: none; font-size: var(--fs-base); font-weight: var(--fw-semi); padding: var(--sp-1) var(--sp-3); min-height: var(--nav-h); display: inline-flex; align-items: center;
   border-radius: var(--r-pill); border: var(--bw) solid var(--line); background: var(--panel);
 }
 .sections a:hover { border-color: var(--teal); }
@@ -49,54 +63,95 @@ html[data-mode="fight"]:not([data-setup="open"]) .setup-tool { display: none; }
 @media (max-width: 1100px) {
   .sections { margin-inline: calc(var(--sp-4) * -1); padding-inline: var(--sp-4); }
   /* on a phone the punch you just threw comes before the timer settings */
-  html[data-mode="fight"] #card-last { order: 1; } html[data-mode="fight"] #card-combos { order: 2; } html[data-mode="fight"] #card-book { order: 3; } html[data-mode="fight"] #card-pb { order: 4; } html[data-mode="fight"] #card-count { order: 5; }
+  html[data-mode="fight"] #card-last { order: 1; } html[data-mode="fight"] #card-combos { order: 2; } html[data-mode="fight"] #card-book { order: 3; } html[data-mode="fight"] #card-count { order: 5; }
   html[data-mode="fight"] #card-clock { order: 6; } html[data-mode="fight"] .lab-toggle { order: 7; } html[data-mode="fight"] .lab-card { order: 8; }
 }
+@media (max-width: 480px) { .sections { gap: var(--sp-1); } .sections a { flex: 1 1 auto; justify-content: center; padding-inline: var(--sp-2); font-size: var(--fs-md); } }
+@media (max-width: 360px) { .sections a { padding-inline: var(--sp-1); } }
 html { scroll-padding-top: calc(var(--nav-h) + var(--sp-3)); }
 
-/* ---------------------------------------------------------------- play: status, hero, coach, grade */
+/* ---------------------------------------------------------------- play: status, hero, stage, grade, bests */
 .play { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--gap-grid); margin-bottom: var(--gap-grid); }
-.play > * { grid-column: 1 / -1; }
-.fun-status { display: grid; gap: var(--sp-2); padding: var(--sp-3) var(--sp-4); border: var(--bw) solid var(--line); border-radius: var(--r-lg); background: var(--panel); }
+.play > * { grid-column: 1 / -1; min-width: 0; }
+
+/* the level bar is one quiet line: Level, the bar, the title, and the weeks ring beside it */
+.fun-status { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--sp-2) var(--sp-5); align-items: center; padding: var(--sp-3) var(--sp-4); border: var(--bw) solid var(--line); border-radius: var(--r-md); background: var(--panel); }
 .fun-status .chips { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
 .fun-status .chip { font-size: var(--fs-sm); }
+.fun-status .fk-xp { grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: var(--sp-1) var(--sp-3); }
+.fun-status .fk-xp-head { display: contents; }
+.fun-status .fk-xp-level { order: 1; font-size: var(--fs-kv); letter-spacing: var(--ls-display); text-transform: uppercase; }
+.fun-status .fk-bar { order: 2; }
+.fun-status .fk-xp-title { order: 3; }
+.fun-status .fk-xp-foot { order: 4; grid-column: 1 / -1; }
+@media (min-width: 900px) { .fun-status { grid-template-columns: minmax(0, 1fr) auto; } }
 .chip.gold { background: var(--fk-gold-soft); color: var(--amber-text); }
 .chip.warn { background: var(--fk-gold-soft); color: var(--amber-text); }
 
-.hero { display: grid; gap: var(--sp-3); }
-.hero-title { font-size: var(--fs-hero); line-height: 1.15; letter-spacing: 0; text-transform: none; color: var(--text); margin: 0; }
-.hero-sub { color: var(--fk-ink-2); font-size: var(--fs-lg); margin: 0; }
-.hero-actions { gap: var(--sp-3); }
+/* hero: the headline, the one button that matters, and what the sensor reads */
+.hero { position: relative; display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--sp-5); padding: var(--sp-5) var(--sp-6); border-top: var(--edge) solid var(--teal); border-radius: var(--r-md); }
+.hero-copy { display: grid; gap: var(--sp-2); align-content: center; min-width: 0; }
+.hero-eyebrow { margin: 0; color: var(--teal-text); font-size: var(--fs-label); font-weight: var(--fw-bold); letter-spacing: var(--ls-label); text-transform: uppercase; }
+.card .hero-title { display: block; font-family: var(--font-display); font-size: var(--fs-hero); font-weight: var(--fw-bold); line-height: .95; letter-spacing: var(--ls-display); text-transform: uppercase; color: var(--text); margin: 0; text-wrap: balance; }
+.hero-sub { color: var(--fk-ink-2); font-size: var(--fs-lg); margin: 0; max-width: 60ch; }
+.hero-actions { gap: var(--sp-3); margin-top: var(--sp-1); }
 button.big { min-height: var(--tap); padding-inline: var(--sp-6); font-size: var(--fs-lg); font-weight: var(--fw-semi); }
+.hero-detail { margin: 0; color: var(--muted); font-size: var(--fs-md); }
 .hero-hint { margin: 0; padding: var(--sp-2) var(--sp-3); border-radius: var(--r-md); background: var(--fk-gold-soft); color: var(--text); font-size: var(--fs-base); }
 .safety { margin: 0; color: var(--muted); font-size: var(--fs-sm); }
+.hero-art { width: 100%; height: auto; display: block; align-self: center; justify-self: stretch; }
+.art-window { fill: color-mix(in srgb, var(--teal) var(--tint), transparent); stroke: var(--line); stroke-width: var(--bw); stroke-dasharray: var(--dash); opacity: .7; }
+.art-axis { stroke: var(--line); stroke-width: var(--bw-2); }
+.art-stop { stop-color: var(--teal); stop-opacity: .4; } .art-stop.z { stop-opacity: 0; }
+.art-area { fill: url(#art-fill); }
+.art-curve { fill: none; stroke: var(--teal); stroke-width: calc(var(--bw-chart) * 1.5); stroke-linecap: round; stroke-dasharray: 1; stroke-dashoffset: 0; animation: draw var(--dur-draw) var(--ease-out) both; }
+.art-best { fill: none; stroke: var(--amber); stroke-width: var(--bw-2); stroke-dasharray: var(--dash); stroke-linecap: round; }
+.art-peak-line { stroke: var(--teal); stroke-width: var(--bw); stroke-dasharray: var(--dash); }
+.art-peak { fill: var(--teal); stroke: var(--panel); stroke-width: var(--bw-chart); }
+.art-label { fill: var(--text); font: var(--fw-semi) var(--fs-md) var(--font); }
+.art-label.best { fill: var(--amber-text); } .art-label.dim { fill: var(--muted); font-weight: var(--fw-medium); }
+@keyframes draw { from { stroke-dashoffset: 1; } }
+@media (min-width: 900px) { .hero { grid-template-columns: minmax(0, 1fr) minmax(0, var(--hero-art-w)); } }
+@media (max-width: 899px) { .hero-art { order: 3; max-height: 7.5rem; } .play:has(#card-pb:not([hidden])) .hero-art { display: none; } }   /* a phone with bests to show gives their room to the bests */
 
-.stage { display: grid; gap: var(--sp-3); }
-.stage h2 { margin: 0; }
+/* the stage: a scoreboard while a round runs */
+.stage { position: relative; overflow: clip; display: grid; gap: var(--sp-3); padding: var(--sp-5); border-top: var(--edge) solid var(--teal); border-radius: var(--r-md); --hit: var(--teal); }
+.stage[data-hit="jab"] { --hit: var(--c-jab); } .stage[data-hit="cross"] { --hit: var(--c-cross); }
+.stage[data-hit="hook"] { --hit: var(--c-hook); } .stage[data-hit="uppercut"] { --hit: var(--c-uppercut); }
+.stage::before { content: ""; position: absolute; inset: 0; border-radius: inherit; pointer-events: none; opacity: 0;
+  box-shadow: inset 0 0 0 var(--edge) var(--hit), inset 0 0 var(--glow-blur) color-mix(in srgb, var(--hit) var(--glow), transparent); }
+.stage.hit::before { animation: hit-wash var(--dur-flash) var(--ease-out) both; }
+@keyframes hit-wash { from { opacity: .9; } to { opacity: 0; } }
+.stage-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--sp-2) var(--sp-4); }
+.stage h2 { margin: 0; align-items: baseline; justify-content: flex-start; gap: var(--sp-3); }
+.stage .stage-phase { color: var(--teal-text); font-family: var(--font-display); font-size: var(--fs-kv); letter-spacing: var(--ls-display); text-transform: uppercase; font-weight: var(--fw-bold); }
 .stage-bar { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); }
-.stage-bar .ghost { margin-left: auto; }
-.stage-bar .ghost + .ghost { margin-left: 0; }
 button.sm { padding: var(--sp-1) var(--sp-3); font-size: var(--fs-sm); min-height: var(--nav-h); }
 .chip.flow { font-size: var(--fs-md); padding: var(--sp-1) var(--sp-3); background: var(--fk-accent-soft); color: var(--teal-text); }
 .chip.flow[data-dim="1"] { opacity: var(--op-dim); }
-.call { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-4); min-height: calc(var(--fs-digit) * 2); }
+.stage-main { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--sp-2) var(--sp-6); align-items: center; }
+.stage-time { display: block; font-family: var(--font-display); font-size: var(--fs-board); font-weight: var(--fw-bold); line-height: .9; letter-spacing: var(--ls-display); font-variant-numeric: tabular-nums; color: var(--text); }
+.stage-time[data-warn="1"] { color: var(--red-text); text-decoration: underline; text-decoration-thickness: var(--bw-chart); text-underline-offset: var(--sp-1); }
+.call { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-4); min-height: calc(var(--fs-digit) * 1.5); min-width: 0; }
 .call-main { min-width: 0; }
-.call-digits { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--sp-2); font-size: var(--fs-digit); font-weight: var(--fw-black); font-variant-numeric: tabular-nums; line-height: var(--lh-tight); }
+.call-digits { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--sp-1) var(--sp-2); font-family: var(--font-display); font-size: var(--fs-digit); font-weight: var(--fw-bold); font-variant-numeric: tabular-nums; line-height: var(--lh-tight); }
 .call-digits .n { position: relative; padding-inline: var(--sp-1); color: var(--muted); border-bottom: var(--bw-chart) solid transparent; transition: color var(--dur), transform var(--dur) var(--ease-spring); }
 .call-digits .n[data-s="spoken"] { color: var(--text); border-bottom-color: var(--muted); }
 .call-digits .n[data-s="hit"] { color: var(--teal-text); border-bottom-color: var(--teal); }
-.call-digits .n[data-s="hit"]::after { content: "\2713"; position: absolute; right: calc(var(--sp-2) * -1); top: calc(var(--sp-1) * -1); font-size: var(--fs-md); }
+.call-digits .n[data-s="hit"]::after { content: "\2713"; position: absolute; right: calc(var(--sp-2) * -1); top: calc(var(--sp-1) * -1); font-family: var(--font); font-size: var(--fs-md); }
 .call-digits .sep { color: var(--muted); font-size: var(--fs-kv); }
-.call-names { margin-top: var(--sp-1); color: var(--muted); font-size: var(--fs-sm); text-transform: uppercase; letter-spacing: var(--ls-kv); }
+.call-names { margin-top: var(--sp-1); color: var(--fk-ink-2); font-size: var(--fs-base); font-weight: var(--fw-semi); text-transform: uppercase; letter-spacing: var(--ls-kv); }
 .call-ring { flex: none; width: var(--ring); height: var(--ring); }
 .call-ring .ring-track { fill: none; stroke: var(--line); stroke-width: var(--ring-w); }
 .call-ring .ring-bar { fill: none; stroke: var(--teal); stroke-width: var(--ring-w); stroke-linecap: round; stroke-dasharray: 100; stroke-dashoffset: var(--off, 0); transform: rotate(-90deg); transform-origin: 50% 50%; }
 .call.idle .call-digits { font-size: var(--fs-kv); font-weight: var(--fw-semi); color: var(--muted); }
+.stage .progress { margin: 0; height: var(--bar-h-stage); }
+.stage .progress > i { transition: width var(--dur-bar) linear; }
 
 /* a judgment: shape plus word, never colour alone */
 .stamp, .grade-stamp {
-  display: inline-flex; align-items: center; gap: var(--sp-3); width: fit-content; max-width: 100%; padding: var(--sp-2) var(--sp-4); border: var(--bw-2) solid currentColor; border-radius: var(--r-md);
-  font-weight: var(--fw-black); letter-spacing: var(--ls-badge); text-transform: uppercase; font-size: var(--fs-stamp); color: var(--text);
+  display: inline-flex; flex-wrap: wrap; align-items: center; gap: var(--sp-1) var(--sp-3); width: fit-content; max-width: 100%; padding: var(--sp-2) var(--sp-4); border: var(--bw-2) solid currentColor; border-radius: var(--r-md);
+  font-family: var(--font-display); font-weight: var(--fw-bold); letter-spacing: var(--ls-badge); text-transform: uppercase; font-size: var(--fs-stamp); color: var(--text);
   animation: stamp-in var(--dur-stamp) var(--ease-spring) both;
 }
 .stamp::before, .grade-stamp::before { content: attr(data-glyph); font-size: 1em; line-height: 1; }
@@ -105,19 +160,45 @@ button.sm { padding: var(--sp-1) var(--sp-3); font-size: var(--fs-sm); min-heigh
 .stamp[data-j="good"], .grade-stamp[data-g="solid"] { color: var(--blue-text); }
 .stamp[data-j="count"] { color: var(--violet-text); }
 .stamp[data-j="missed"], .grade-stamp[data-g="warmup"] { color: var(--muted); }
-.stamp .why { font-weight: var(--fw-medium); letter-spacing: 0; text-transform: none; font-size: var(--fs-base); color: var(--fk-ink-2); }
+.stamp > span:first-child { white-space: nowrap; }
+.stamp .why { flex: 1 1 10rem; font-family: var(--font); font-weight: var(--fw-medium); letter-spacing: 0; text-transform: none; font-size: var(--fs-base); color: var(--fk-ink-2); }
 .grade-stamp { font-size: var(--fs-grade); }
 @keyframes stamp-in { from { opacity: 0; transform: scale(var(--stamp-scale)) rotate(var(--stamp-rot)); } }
 @keyframes pop-in { from { transform: scale(var(--pop-scale)); } }
+@keyframes slam { 0% { transform: scale(var(--slam-scale)); opacity: .35; } 55% { transform: scale(.97); opacity: 1; } 100% { transform: none; } }
+@keyframes shock { from { opacity: .75; transform: translate(-50%, -50%) scale(var(--ring-from)); } to { opacity: 0; transform: translate(-50%, -50%) scale(var(--ring-to)); } }
 @keyframes slide-in { from { opacity: 0; transform: translateY(calc(var(--sp-2) * -1)); } }
 .countit { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-3); padding: var(--sp-2) var(--sp-3); border: var(--bw) dashed var(--line); border-radius: var(--r-md); font-size: var(--fs-base); }
-.live-row { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--sp-2) var(--sp-4); }
-.live-speed { font-size: var(--fs-kv); font-weight: var(--fw-bold); font-variant-numeric: tabular-nums; }
-.live-row .combo-str { font-size: var(--fs-kv); min-height: 0; margin-left: auto; }
-.live-row .tier { margin-left: 0; }
-.coach-line { margin: 0; color: var(--fk-ink-2); font-size: var(--fs-base); min-height: var(--fs-lg); }
-.stage .progress { margin: 0; }
-.tally { color: var(--muted); font-size: var(--fs-md); font-variant-numeric: tabular-nums; }
+
+/* the hit: type and hand, the speed as the biggest thing on the page, how it ranks against your best, and the combo it belongs to */
+.live-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "id grade" "speed speed" "combo tally"; align-items: center; gap: var(--sp-1) var(--sp-4); padding-top: var(--sp-3); border-top: var(--bw) solid var(--line); }
+.hit-id { grid-area: id; display: flex; align-items: center; gap: var(--sp-2); min-width: 0; }
+.hit-id .badge { font-family: var(--font-display); font-size: var(--fs-kv); letter-spacing: var(--ls-badge); }
+.hit-speed { grid-area: speed; position: relative; display: flex; align-items: baseline; justify-content: center; gap: var(--sp-2); min-width: 0; }
+.hit-speed b { position: relative; z-index: 1; font-family: var(--font-display); font-size: var(--fs-slam); font-weight: var(--fw-bold); line-height: .95; letter-spacing: var(--ls-display); font-variant-numeric: tabular-nums; color: var(--hit, var(--text)); }
+.hit-speed .unit { position: relative; z-index: 1; margin: 0; font-family: var(--font-display); font-size: var(--fs-kv); letter-spacing: var(--ls-display); color: var(--fk-ink-2); }
+.hit-ring { position: absolute; left: 50%; top: 50%; width: var(--ring-hit); aspect-ratio: 1; border: var(--bw-2) solid var(--hit); border-radius: 50%; opacity: 0; transform: translate(-50%, -50%) scale(var(--ring-from)); pointer-events: none; }
+.hit-ring.go { animation: shock var(--dur-ring) var(--ease-out) both; }
+#stage-speed.slam { animation: slam var(--dur-slam) var(--ease-spring) both; }
+.hit-meta { display: contents; }
+.hit-grade { grid-area: grade; display: inline-flex; align-items: center; gap: var(--sp-2); justify-self: end; }
+.live-row .combo-str { grid-area: combo; font-family: var(--font-display); font-size: var(--fs-kv); letter-spacing: var(--ls-badge); min-height: 0; margin-left: 0; }
+.tally { grid-area: tally; justify-self: end; color: var(--muted); font-size: var(--fs-md); font-variant-numeric: tabular-nums; }
+.live-row .tier { margin-left: 0; font-size: var(--fs-base); }
+.tier-meter { display: inline-flex; gap: var(--sp-hair); }
+.tier-meter i { display: block; width: var(--meter-w); height: var(--bar-h-lg); border-radius: var(--r-sm); background: var(--panel-2); border: var(--bw) solid var(--line); }
+.tier-meter[data-lit="1"] i:nth-child(-n+1), .tier-meter[data-lit="2"] i:nth-child(-n+2), .tier-meter[data-lit="3"] i:nth-child(-n+3), .tier-meter[data-lit="4"] i { background: var(--hit); border-color: var(--hit); }
+.tier-meter[data-t="snap"] i { background: var(--amber); border-color: var(--amber); }
+.coach-line { margin: 0; color: var(--fk-ink-2); font-size: var(--fs-lg); min-height: var(--fs-lg); }
+@media (min-width: 900px) {
+  .live-row { grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); grid-template-areas: "id speed meta"; padding-top: var(--sp-4); }
+  .hit-meta { grid-area: meta; display: grid; justify-items: end; gap: var(--sp-2); }
+  .hit-grade, .live-row .combo-str, .tally { grid-area: auto; }
+  .live-row .combo-str { font-size: var(--fs-bests); }
+  .hit-id .badge { font-size: var(--fs-bests); padding-inline: var(--sp-4); }
+  .stage-main { grid-template-columns: auto minmax(0, 1fr); }
+  .call { justify-content: flex-end; }
+}
 /* the three first-win steps of the warm-up: shape plus word, never colour alone */
 .beats { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
 .beat { display: inline-flex; gap: var(--sp-1); padding: var(--sp-hair) var(--sp-3); border: var(--bw) dashed var(--line); border-radius: var(--r-pill); font-size: var(--fs-md); color: var(--muted); }
@@ -128,17 +209,17 @@ button.sm { padding: var(--sp-1) var(--sp-3); font-size: var(--fs-sm); min-heigh
 /* the Play area's cards take keyboard focus from code (when the control that had it is hidden), so they show a ring when they do */
 .hero:focus-visible, .stage:focus-visible, .grade:focus-visible { outline: var(--bw-2) solid var(--teal); outline-offset: var(--bw); }
 
-.grade { display: grid; gap: var(--sp-3); }
+.grade { display: grid; gap: var(--sp-3); border-top: var(--edge) solid var(--teal); border-radius: var(--r-md); }
 .grade h2 { margin: 0; }
-.grade-row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-4); }
+.grade-row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-4) var(--sp-6); }
 .grade-info { display: grid; gap: var(--sp-1); }
-.grade-xp { font-size: var(--fs-kv); font-weight: var(--fw-bold); font-variant-numeric: tabular-nums; }
-.grade-line { color: var(--fk-ink-2); }
+.grade-xp { font-family: var(--font-display); font-size: var(--fs-bests); line-height: 1; letter-spacing: var(--ls-display); font-weight: var(--fw-bold); font-variant-numeric: tabular-nums; }
+.grade-line { color: var(--fk-ink-2); font-size: var(--fs-lg); }
 .ribbon { width: fit-content; padding: var(--sp-hair) var(--sp-3); border-radius: var(--r-pill); background: var(--fk-gold-soft); color: var(--amber-text); font-weight: var(--fw-bold); font-size: var(--fs-md); }
 .ribbon::before { content: "\25C6  "; }
 .grade-parts { display: grid; grid-template-columns: repeat(auto-fit, minmax(var(--w-kv), 1fr)); gap: var(--sp-2) var(--sp-4); }
 .grade-parts .gp { display: grid; gap: var(--sp-hair); font-size: var(--fs-sm); color: var(--muted); }
-.grade-parts .gp b { color: var(--text); font-size: var(--fs-lg); font-variant-numeric: tabular-nums; }
+.grade-parts .gp b { color: var(--text); font-family: var(--font-display); font-size: var(--fs-kv); letter-spacing: var(--ls-display); font-variant-numeric: tabular-nums; }
 .grade-actions { margin-top: var(--sp-2); }
 
 /* the last punch card: a tier chip beside the type, and the punch pops in */
@@ -151,19 +232,42 @@ button.sm { padding: var(--sp-1) var(--sp-3); font-size: var(--fs-sm); min-heigh
 @keyframes flash { from { opacity: .3; } }
 #last-type.pop { animation: pop-in var(--dur-pop) var(--ease-spring) both; }
 .combo-str.pop { animation: pop-in var(--dur-pop) var(--ease-spring) both; }
+#stage-last.pop { animation: pop-in var(--dur-pop) var(--ease-spring) both; }
+
+/* ---------------------------------------------------------------- your bests: the board (speeds big and by punch type, the other marks beside them) */
+.bests { border-top: var(--edge) solid var(--amber); border-radius: var(--r-md); }
+.pb-list { list-style: none; display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: var(--sp-2); margin: 0; padding: 0; }
+.pb-cell { position: relative; display: grid; align-content: start; gap: var(--sp-hair); min-width: 0; padding: var(--sp-3) var(--sp-4); border: var(--bw) solid var(--line); border-radius: var(--r-md); background: var(--panel-2); }
+.pb-cell .nm { font-size: var(--fs-label); font-weight: var(--fw-bold); letter-spacing: var(--ls-label); text-transform: uppercase; color: var(--c, var(--muted)); }
+.pb-cell .val { font-family: var(--font-display); font-size: var(--fs-bests); font-weight: var(--fw-bold); line-height: 1; letter-spacing: var(--ls-display); font-variant-numeric: tabular-nums; color: var(--text); overflow-wrap: anywhere; }
+.pb-cell .unit { margin: 0; font-size: var(--fs-md); color: var(--muted); }
+.pb-cell.speed { grid-column: span 3; grid-template-columns: auto minmax(0, 1fr); align-items: baseline; gap: var(--sp-hair) var(--sp-2); border-top: var(--edge) solid var(--c); }
+.pb-cell.speed .nm { grid-column: 1 / -1; }
+.pb-cell.speed::after { content: "\25C6"; position: absolute; top: var(--sp-2); right: var(--sp-3); color: var(--amber-text); font-size: var(--fs-md); }
+.pb-cell.mark { grid-column: span 4; grid-template-columns: auto minmax(0, 1fr); align-items: baseline; gap: var(--sp-hair) var(--sp-2); }
+.pb-cell.mark .nm { overflow-wrap: anywhere; }
+.pb-cell.mark .nm { grid-column: 1 / -1; }
+.pb-cell.mark .val { font-size: var(--fs-big); }
+@media (max-width: 700px) { .pb-cell.speed { grid-column: span 6; } .pb-cell.mark { grid-template-columns: minmax(0, 1fr); padding-inline: var(--sp-3); } .pb-cell.mark .nm { letter-spacing: var(--ls-badge); } }
 
 /* ---------------------------------------------------------------- the Combo Book */
 .book { list-style: none; display: grid; grid-template-columns: repeat(auto-fill, minmax(var(--w-kpi), 1fr)); gap: var(--sp-2); margin: 0; padding: 0; }
 .book-page { display: grid; gap: var(--sp-hair); padding: var(--sp-2) var(--sp-3); border: var(--bw) solid var(--line); border-radius: var(--r-md); background: var(--panel-2); }
 .book-page .nm { font-weight: var(--fw-semi); font-size: var(--fs-base); }
-.book-page .str { font-variant-numeric: tabular-nums; letter-spacing: var(--ls-badge); font-weight: var(--fw-black); color: var(--teal-text); }
+.book-page .str { font-family: var(--font-display); font-size: var(--fs-kv); font-variant-numeric: tabular-nums; letter-spacing: var(--ls-badge); font-weight: var(--fw-bold); color: var(--teal-text); }
 .book-page .best { color: var(--muted); font-size: var(--fs-sm); }
 .book-page .best::before { content: attr(data-glyph) " "; }
 .book-page[data-locked="1"] { border-style: dashed; background: transparent; }
 .book-page[data-locked="1"] .str, .book-page[data-locked="1"] .nm { color: var(--muted); }
 .book-page[data-new="1"] { border-color: var(--teal); }
 
-.pb-list .book-page .str { color: var(--text); letter-spacing: 0; }
+/* ---------------------------------------------------------------- the idle timer card: one strip in the Fight view */
+@media (min-width: 1101px) {
+  html[data-mode="fight"] #card-clock { grid-column: span 12; display: grid; grid-template-columns: auto auto minmax(0, 1fr); align-items: end; gap: var(--sp-2) var(--sp-8); min-height: 0; }
+  html[data-mode="fight"] #card-clock h2 { grid-column: 1 / -1; margin-bottom: 0; }
+  html[data-mode="fight"] #card-clock .progress { margin-bottom: 0; }
+  html[data-mode="fight"] #card-clock .settings { margin-top: 0; }
+}
 
 /* ---------------------------------------------------------------- lab details toggle, settings */
 .lab-toggle { grid-column: span 12; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--sp-3); padding: var(--sp-3) var(--sp-4); border: var(--bw) dashed var(--line); border-radius: var(--r-lg); }
@@ -176,15 +280,20 @@ button.sm { padding: var(--sp-1) var(--sp-3); font-size: var(--fs-sm); min-heigh
 .settings-card .seg button { min-height: var(--nav-h); }
 .settings-card .seg button.on { background: var(--teal); color: var(--ink-teal); }
 
-/* ---------------------------------------------------------------- the recap sheet */
+/* ---------------------------------------------------------------- the recap sheet: the cards are stacked, so nothing in it moves sideways */
 .recap-dialog {
   margin: auto; width: min(var(--w-recap), calc(100% - var(--sp-6))); max-height: calc(100% - var(--sp-6)); overflow: auto; padding: var(--sp-4); border: var(--bw) solid var(--line);
-  border-radius: var(--r-lg); background: var(--panel); color: var(--text); box-shadow: var(--fk-shadow);
+  border-radius: var(--r-lg); background: var(--panel); color: var(--text); box-shadow: var(--fk-shadow); overscroll-behavior: contain;
 }
 .recap-dialog::backdrop { background: var(--fk-overlay); }
 .recap-head { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3); margin-bottom: var(--sp-3); }
-.recap-head h2 { margin: 0; font-size: var(--fs-lg); letter-spacing: 0; text-transform: none; color: var(--text); }
-.recap-dialog .fk-recap-card { min-height: 0; }
+.recap-head h2 { margin: 0; font-family: var(--font-display); font-size: var(--fs-kv); letter-spacing: var(--ls-display); text-transform: uppercase; color: var(--text); }
+.recap-dialog .fk-recap { gap: 0; }
+.recap-dialog .fk-recap-track { flex-direction: column; overflow: visible; scroll-snap-type: none; padding: 0; gap: var(--sp-2); }
+.recap-dialog .fk-recap-card { flex: 0 0 auto; min-height: 0; padding: var(--sp-4); gap: var(--sp-2); border-radius: var(--r-md); }
+.recap-dialog .fk-dots, .recap-dialog .fk-recap-actions { display: none; }
+.recap-dialog .fk-recap-big { font-size: var(--fs-bests); letter-spacing: var(--ls-display); text-transform: uppercase; }
+.recap-dialog .fk-recap-text { font-size: var(--fs-base); max-width: none; }
 .rounds-bars { display: flex; align-items: flex-end; gap: var(--sp-3); margin-top: var(--sp-3); min-height: calc(var(--ring) + var(--sp-8)); }
 .rounds-bars .rb { flex: 1; display: grid; gap: var(--sp-1); justify-items: center; font-size: var(--fs-sm); color: var(--muted); }
 .rounds-bars .rb .bar { width: 100%; min-height: var(--sp-2); height: calc(var(--h, .2) * var(--ring)); border-radius: var(--r-sm) var(--r-sm) 0 0; background: var(--teal); }
@@ -195,6 +304,7 @@ button.sm { padding: var(--sp-1) var(--sp-3); font-size: var(--fs-sm); min-heigh
 .feedback .seg button { min-height: var(--nav-h); }
 .feedback .seg button.on { background: var(--teal); color: var(--ink-teal); }
 .recap-cta { margin-top: var(--sp-3); gap: var(--sp-2); }
+.recap-cta button.primary { min-height: var(--tap); }
 .reminder { margin-top: var(--sp-3); border: var(--bw) dashed var(--line); border-radius: var(--r-md); padding: var(--sp-2) var(--sp-3); }
 .reminder summary { cursor: pointer; font-weight: var(--fw-semi); font-size: var(--fs-base); min-height: var(--nav-h); display: flex; align-items: center; }
 .reminder summary:focus-visible { outline: var(--bw-2) solid var(--teal); outline-offset: var(--bw); }
@@ -211,20 +321,31 @@ button.sm { padding: var(--sp-1) var(--sp-3); font-size: var(--fs-sm); min-heigh
   html[data-fun="on"][data-mode="fight"][data-playing="1"] #top { margin-bottom: var(--sp-2); }
   html[data-fun="on"][data-mode="fight"][data-playing="1"] body { padding-top: var(--sp-3); }
 }
+/* a short wide screen (a projector at 720 p): the first screen gives up a little air so the bests still sit above the fold */
+@media (min-width: 900px) and (max-height: 760px) {
+  html[data-fun="on"][data-mode="fight"] body { padding-top: var(--sp-3); }
+  html[data-fun="on"][data-mode="fight"] #top { margin-bottom: var(--sp-3); }
+  html[data-fun="on"][data-mode="fight"] .fun-status .fk-xp-foot { display: none; }
+}
+/* the header's tagline repeats the hero's eyebrow, so a phone drops it in the Fight view */
+@media (max-width: 700px) { html[data-fun="on"][data-mode="fight"] #top .brand .sub { display: none; } }
 
 /* ---------------------------------------------------------------- phone width */
+@media (max-width: 420px) { html[data-fun="on"][data-mode="fight"] #top .seg-label { display: none; } }
+@media (max-width: 360px) { html[data-fun="on"][data-mode="fight"] #top .controls { gap: var(--sp-1); } html[data-fun="on"][data-mode="fight"] #top button { padding-inline: var(--sp-2); } }   /* m/s | mph is plain enough, and the header then fits two rows */
 @media (max-width: 480px) {
+  .hero { padding: var(--sp-4); }
   .hero-actions button { flex: 1 1 100%; }
-  .stage-bar .ghost { margin-left: 0; }
-  .call-digits { font-size: calc(var(--fs-digit) * .85); }
+  .stage { padding: var(--sp-4); }
   .grade-stamp { font-size: calc(var(--fs-grade) * .85); }
   .controls { width: 100%; }
+  .call-ring { width: calc(var(--ring) * .7); height: calc(var(--ring) * .7); }
 }
 
-/* ---------------------------------------------------------------- desktop: the four live cards sit two by two */
+/* ---------------------------------------------------------------- desktop: the live cards sit three across while there is something to show */
 @media (min-width: 1101px) {
-  html[data-mode="fight"] #card-clock, html[data-mode="fight"] #card-last, html[data-mode="fight"] #card-count, html[data-mode="fight"] #card-combos { grid-column: span 6; }
-  html[data-mode="fight"] #card-book, html[data-mode="fight"] #card-pb { grid-column: span 12; }
+  html[data-mode="fight"] .live-card { grid-column: span 4; }
+  html[data-mode="fight"] #card-book { grid-column: span 12; }
 }
 
 /* ---------------------------------------------------------------- reduced motion: the device setting, or Settings > Motion (which wins either way) */

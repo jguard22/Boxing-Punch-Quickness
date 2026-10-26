@@ -5,12 +5,14 @@
 import { renderXpBar, renderRecapCarousel, countUp } from "../vendor/fun-kit/index.js";
 import { COPY } from "./copy.js";
 import { GRADES, JUDGMENTS, SPEED_TIERS } from "./config.js";
+import { boardGroups, tierLit } from "./board.js";
 
 const $ = (id) => document.getElementById(id);
 const GLYPH = { diamond: "◆", circle: "●", triangle: "▲", square: "■", dash: "−" };
 const glyph = (shape) => GLYPH[shape] ?? GLYPH.dash;
 const setText = (el, t) => { if (el && el.textContent !== t) el.textContent = t; };
-const show = (el, on) => { if (el) el.hidden = !on; };
+// toggleAttribute, not .hidden: an SVG element (the call ring) has no .hidden property, so setting it never showed the ring
+const show = (el, on) => { if (el) el.toggleAttribute("hidden", !on); };
 const pressed = (group, value) => group?.querySelectorAll("button").forEach((b) => { const on = b.dataset.v === value; b.classList.toggle("on", on); b.setAttribute("aria-pressed", String(on)); });
 const restartAnim = (el, cls) => { if (!el) return; el.classList.remove(cls); void el.offsetWidth; el.classList.add(cls); };
 /** Scroll an element into place at once (never an animation: a call cannot wait for one). */
@@ -48,13 +50,16 @@ export function createView() {
   }
 
   // ---- hero
-  function setHero({ first, coachText, sim, ready }) {
+  function setHero({ first, coachText, detailText, sim, ready }) {
     setText($("hero-title"), first ? COPY.hero.title : COPY.hero.backTitle);
     setText($("hero-sub"), first ? COPY.hero.sub : COPY.hero.backSub);
     const w = $("hero-warmup"), s = $("hero-sim");
     if (w) { setText(w, first ? COPY.hero.warmup : coachText); w.dataset.kind = first ? "warmup" : "coach"; w.classList.toggle("primary", !!ready); }
+    // the one-line detail under the buttons: what "Start a round" will run (only once the first win is done)
+    const detail = $("hero-detail");
+    if (detail) { setText(detail, first ? "" : detailText || ""); show(detail, !first && !!detailText); }
     // the teal button is the one that works right now: with no sensor and no Simulate that is Simulate, never a button that only shows a hint
-    if (s) { setText(s, sim ? COPY.hero.simOn : COPY.hero.sim); s.setAttribute("aria-pressed", String(!!sim)); s.classList.toggle("primary", !ready); }
+    if (s) { setText(s, sim ? COPY.hero.simOn : first ? COPY.hero.sim : COPY.hero.simRound); s.setAttribute("aria-pressed", String(!!sim)); s.classList.toggle("primary", !ready); }
     const again = $("hero-warm");
     if (again) { setText(again, COPY.hero.again); show(again, !first); }
   }
@@ -64,8 +69,10 @@ export function createView() {
     el.textContent = text || "";
     show(el, !!text);
   }
-  function layout({ hero, stage, grade, actions: act, recap: hasRecap = true }) {
+  function layout({ hero, stage, grade, actions: act, recap: hasRecap = true, punches = 0 }) {
     const had = document.activeElement;
+    document.documentElement.dataset.hero = hero ? "1" : "0";            // the timer settings card shows with the hero only: a set that is running or graded has locked them
+    document.documentElement.dataset.punches = punches > 0 ? "1" : "0";    // the empty live cards (last punch, count, combos) stay away until there is a punch to show
     show($("fun-hero"), !!hero); show($("fun-stage"), !!stage); show($("fun-grade"), !!grade); show($("grade-actions"), !!act);
     show($("grade-recap"), hasRecap);                                         // a round with nothing read has nothing to recap
     document.documentElement.dataset.playing = stage ? "1" : "0";            // a phone screen is for the round while it runs (fun.css drops the status and header extras)
@@ -118,7 +125,13 @@ export function createView() {
     const stop = $("stage-stop");
     if (stop) show(stop, !!running);
   }
-  const stageTime = (text) => setText($("stage-time"), text);
+  /** The round time on the stage; in the clock's last ten seconds it turns red and underlined (the page's own clock card decides when). */
+  function stageTime(text) {
+    const el = $("stage-time");
+    if (!el) return;
+    setText(el, text);
+    el.dataset.warn = $("clock")?.classList.contains("warn") ? "1" : "0";
+  }
   const stageTally = (n) => setText($("stage-tally"), COPY.stage.tally(n));
   /** How far through the round the clock is, as a bar (quiet: no sound, no celebration). */
   function stageProgress(frac) { const b = $("stage-bar"); if (b) b.style.width = `${Math.round(Math.max(0, Math.min(1, frac || 0)) * 100)}%`; }
@@ -147,8 +160,17 @@ export function createView() {
   function mirrorLast() {
     const t = $("last-type"), st = $("stage-last");
     if (st && t) { st.className = t.className.replace("pop", "").trim(); setText(st, t.textContent); }
+    const hb = $("stage-hand"), lh = $("last-hand");
+    if (hb && lh) { hb.className = lh.className; setText(hb, lh.textContent); hb.hidden = lh.hidden; }
     setText($("stage-speed"), $("last-speed")?.textContent ?? "—");
     setText($("stage-combo"), $("last-combo")?.textContent ?? "—");
+  }
+  /** A new round starts with a clean board: no leftover punch colour, ring or meter from the last one. */
+  function resetHit() {
+    const stage = $("fun-stage");
+    if (stage) { delete stage.dataset.hit; stage.classList.remove("hit"); }
+    $("hit-ring")?.classList.remove("go"); $("stage-speed")?.classList.remove("slam");
+    const m = $("stage-meter"); if (m) { m.dataset.lit = "0"; show(m, false); }
   }
   const coach = (text) => setText($("coach-line"), text || "");
   function flow(mult, dim = false) {
@@ -215,17 +237,29 @@ export function createView() {
   }
 
   // ---- the last punch card
-  let speedCount = null;
+  let speedCount = null, lastWash = -Infinity;
+  const WASH_GAP_MS = 340;           // the ring and the edge wash fire at most three times a second, however fast the punches come
+  /**
+   * The punch lands. The type chip and the combo pop, and on the stage the speed slams in with a ring that opens from behind it and a
+   * quick wash along the card's edge, all in the colour of the punch type (that colour stays as a static cue after the motion, and
+   * under reduced motion the motion goes and the colour, the words and the number stay). Transform and opacity only, once per punch.
+   */
   function punchPop(type) {
+    const stage = $("fun-stage");
+    document.documentElement.dataset.punches = "1";
     restartAnim($("last-type"), "pop");
     restartAnim($("combo-cur"), "pop");
     mirrorLast();
+    if (stage && type) stage.dataset.hit = type;
     restartAnim($("stage-last"), "pop");
+    restartAnim($("stage-speed"), "slam");
+    const t = Date.now();
+    if (t - lastWash >= WASH_GAP_MS) { lastWash = t; restartAnim($("hit-ring"), "go"); restartAnim(stage, "hit"); }
     if (type) restartAnim(document.querySelector(`#type-bars .tb.pt-${type} .fill`), "flash");       // the bar of that punch type flashes once
-    // the speed counts up to its value (the kit jumps straight to it under reduced motion)
+    // the speed counts up to its value for a moment while it slams (the kit jumps straight to it under reduced motion)
     const el = $("stage-speed"), to = parseFloat($("last-speed")?.textContent ?? "");
     speedCount?.cancel();
-    speedCount = el && Number.isFinite(to) ? countUp(el, to, { from: 0, duration: 260, format: (v) => v.toFixed(1) }) : null;
+    speedCount = el && Number.isFinite(to) ? countUp(el, to, { from: 0, duration: 180, format: (v) => v.toFixed(1) }) : null;
   }
   function tier(t, type) {
     for (const id of ["last-tier", "stage-tier"]) {
@@ -238,6 +272,9 @@ export function createView() {
       el.title = meta.line(type, t.pct);
       show(el, true);
     }
+    // the four-step meter beside the stage's tier chip: Easy lights one step, Snap all four (the word and the shape stay the signal)
+    const m = $("stage-meter");
+    if (m) { m.dataset.lit = String(tierLit(t?.id)); m.dataset.t = t?.id ?? ""; show(m, !!t); }
   }
   function lastNote(text) {
     const el = $("last-note");
@@ -270,19 +307,21 @@ export function createView() {
     setText($("book-note"), own > 0 ? COPY.book.own(own) : COPY.book.note);
   }
 
-  // ---- personal bests (the speed values arrive already formatted for the m/s or mph choice)
+  // ---- your bests: the board (the speed values arrive already formatted for the m/s or mph choice)
   function pbShelf({ items, show: on }) {
     const card = $("card-pb");
     if (!card) return;
     show(card, !!on);
     if (!on) return;
-    $("pb-list")?.replaceChildren(...items.map((it) => {
-      const li = document.createElement("li"); li.className = "book-page"; li.dataset.locked = "0";
-      const nm = document.createElement("span"); nm.className = "nm"; nm.textContent = it.label;
-      const v = document.createElement("span"); v.className = "str"; v.textContent = it.text;
-      li.append(nm, v);
+    const { speeds, marks } = boardGroups(items);
+    const span = (cls, text) => { const e = document.createElement("span"); e.className = cls; e.textContent = text; return e; };
+    const cell = (kind, o) => {
+      const li = document.createElement("li");
+      li.className = `pb-cell ${kind}${o.type ? ` pt-${o.type}` : ""}`; li.dataset.kind = kind;
+      li.append(span("nm", o.label), span("val", o.value), ...(o.unit ? [span("unit", o.unit)] : []));
       return li;
-    }));
+    };
+    $("pb-list")?.replaceChildren(...speeds.map((o) => cell("speed", o)), ...marks.map((o) => cell("mark", o)));
   }
 
   // ---- round grade
@@ -440,7 +479,7 @@ export function createView() {
   return {
     bind, announce, renderStatus, setHero, hint, layout, focusPlay, showStage, showHero, reveal, clearWarn, againLabel, setStage, coach, flow, showCall, digit, ring, endCall, clearCall, stamp, countIt,
     stageTally, stageProgress, beats, easeOffer,
-    punchPop, mirrorLast, stageTime, tier, lastNote, book, pbShelf, gradeCard, reminder, recap, recapNote, closeRecap, settings, mode, lab, setup, forgetLabel,
+    punchPop, mirrorLast, resetHit, stageTime, tier, lastNote, book, pbShelf, gradeCard, reminder, recap, recapNote, closeRecap, settings, mode, lab, setup, forgetLabel,
     tierNames: SPEED_TIERS.map((t) => t.id),
   };
 }

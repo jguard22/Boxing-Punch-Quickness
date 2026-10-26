@@ -15,6 +15,7 @@ context) — `npm run serve` (tiny static server on <http://127.0.0.1:5362/>), o
 Simulate session, checks the UI, the unit switch, CSV export, mobile layout and
 zero console errors) and `npm run smoke:fun` (the Fight view: first win, coached set, views, reduced motion, forget).
 `npm run shoot:fun` writes the 390 px light, dark and reduced-motion screenshots to `docs/screenshots/fun/`.
+`node scripts/shoot-review.mjs <prefix> <outdir>` shoots the same screens at 1280, 390 and 320 px, light and dark, named `<prefix>-<screen>-<width>-<look>.png` so a before and an after line up (the 25 Oct design review, `docs/REVIEW-2026-10-25.md`).
 
 ## Files
 | File | What |
@@ -24,10 +25,10 @@ zero console errors) and `npm run smoke:fun` (the Fight view: first win, coached
 | `core.js` | pure logic (`window.BPCore` / `require`): detector, classifier, combos, round clock, stats, confusion, weight shift, CSV rows, sim generators |
 | `app.js` | UI, round clock wiring, audio, SDK adapter, Simulate engine; a small event bridge out (`bwfun`) and command bridge in (`bwcmd`) to the fun layer |
 | `fun.css` | the fun layer's styles: the kit's `--fk-*` tokens mapped to this page's tokens, plus the Fight view |
-| `src/fun/` | the fun layer (see "Bag Work" below); `src/vendor/fun-kit/` is the vendored shared kit, never edited here |
+| `src/fun/` | the fun layer (see "Bag Work" below; `board.js` is the bests board and speed meter as plain data); `src/vendor/fun-kit/` is the vendored shared kit, never edited here |
 | `test/core.test.mjs` | unit tests for `core.js` (`node --test`) |
 | `test/fun-*.test.mjs`, `test/hygiene.test.mjs` | the fun layer: rules, calls, guardrails, the session controller on a fake page, repo hygiene |
-| `scripts/serve.mjs`, `scripts/smoke.mjs`, `scripts/smoke-fun.mjs`, `scripts/shoot-fun.mjs` | static server (:5362), the lab smoke, the Fight view smoke, the screenshots |
+| `scripts/serve.mjs`, `scripts/smoke.mjs`, `scripts/smoke-fun.mjs`, `scripts/shoot-fun.mjs`, `scripts/shoot-review.mjs` | static server (:5362), the lab smoke, the Fight view smoke, the screenshots, the review before/after pairs |
 
 ## Punch detection & speed
 Wrist linear acceleration at 200 Hz (5 ms). Onset = |accel| > 2 g after a
@@ -110,7 +111,8 @@ The page still loads the six-line `boot.js` and the two stylesheets (`fun.css`, 
   Speeds are stored in m/s and shown as m/s or mph (the header switch) everywhere.
 - **Combo Book.** Appears after your first combo: eleven named pages (One-Two, Classic, Four Count, Up and Over, Corkscrew ...) and a hidden Alphabet page (`1-2-3-4-5-6` in one chain),
   each with a count and the best way you landed it (free work, Counted, Good, Great, Perfect). Any combo you land is logged, named or not. Two badges: five different combos, all twelve pages.
-- **Personal bests** (card appears after your first scored round): top hand speed per punch type, best Round Grade, best Flow, longest chain. Speeds are stored in m/s and shown in your unit.
+- **Your bests** (the board appears after your first scored round, directly under the hero, so a returning visit opens on it with *Start a round* beside it): top hand speed per punch type as big numerals, then best Round Grade, best Flow and longest chain. Speeds are stored in m/s and shown in your unit. The board hides while a round runs.
+- **The stage is a scoreboard** (read from two or three metres): the round time, the call digits and the hand speed are the biggest things on the page, sized from the viewport's height as well as its width. Each punch slams its speed in, opens a ring behind it and washes the card's edge, all in the punch type's colour (the colour stays as a static cue; the ring and wash fire at most three times a second), beside a four-step meter that shows the speed tier (Easy one step, Snap four) and, on a Snap, a small bright tick after the thud. Reduced motion removes the motion and keeps the colour, the number and the words.
 - **Label Lab.** Reviewing a punch's label in the Punch Log pays a flat 1 XP (20 a session, once per punch). It pays the same whether you changed the auto label or confirmed it, *Mark all unreviewed
   correct* and Simulate pay nothing, and no reward anywhere depends on agreeing or disagreeing with the auto label.
 - **Starting over asks twice when it would lose work.** Play again, the recap's button and the hero clear the punches on the page; if any of them carries a label somebody reviewed (not the
@@ -121,6 +123,7 @@ The page still loads the six-line `boot.js` and the two stylesheets (`fun.css`, 
 - **Weekly ring.** Three sessions a week by default (a full, non-warm-up round starts a session; only the first full round of a sitting counts), 1 to 5 in Settings. Lowering starts now, raising next week, and past weeks keep the goal they were played under. A lapse is a welcome-back with a bonus, never a loss.
 - **Settings** (all local): motion (follow the device, reduced, full), sounds, coach voice (off by default), coach calls, light / dark, the feedback tap,
   fun stats (counts only, CSV) and **Forget my data** (`kit.reset()`; a round in progress is stopped first). If the browser blocks storage the layer still runs on memory and the status says XP is kept only until the page closes.
+- **First screen.** The headline, the bests and one primary button; the empty Last Punch, Punch Count and Combos cards wait for the first punch, and the timer settings sit under the bests (they are locked once a set starts, so they show with the hero only). With a sensor or Simulate live the teal button is *Start a round*; with neither it is *Simulate a round (no sensors)*.
 - **On a phone** the status card and the header extras step aside while a round runs, the stage scrolls to the top when a round starts, and a call opening while you are scrolled elsewhere brings itself on screen.
 - **Guardrails.** Bag and pad work only: copy never says damage, knockout, power or force. No haptics are sent in this build (TODO[SDK]); the rule is tested:
   never inside a punch window or within 350 ms of an onset. Celebrations (confetti, toasts, level-up) wait behind one quiet gate while a round runs.
