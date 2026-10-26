@@ -67,5 +67,6 @@ export function buildRecapCards(o) {
     title: o.nextUnlock ? R.nextUnlock(o.nextUnlock.level, o.nextUnlock.label) : R.nextTop, list: next,
   });
   // The kit's carousel prints a list only when it has two lines or more; a single line is folded into the card's sentence instead.
-  return cards.map((c) => (c.list?.length === 1 ? { ...c, title: `${c.title} ${c.list[0]}`, list: [] } : c));
+  const stop = (t) => (/[.!?]$/.test(t) ? t : `${t}.`);          // a title that has no full stop gets one before the folded line: "Your longest chain. 5 different combos this session"
+  return cards.map((c) => (c.list?.length === 1 ? { ...c, title: `${stop(c.title)} ${c.list[0]}`, list: [] } : c));
 }
